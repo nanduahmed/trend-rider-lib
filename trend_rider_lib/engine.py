@@ -123,46 +123,57 @@ class TrendRiderEngine:
             fsm = self._restore_fsm(ticker, context)
 
             if ticker in new_candles:
-                new_df = new_candles[ticker]
+                raw_df = new_candles[ticker].copy()
+
+                # Enforce daily-before-weekly ordering on the same date
+                if 'timeframe' in raw_df.columns:
+                    raw_df['_order'] = raw_df['timeframe'].map({'daily': 0, 'weekly': 1}).fillna(0)
+                    raw_df = raw_df.reset_index()
+                    date_col = 'Date' if 'Date' in raw_df.columns else raw_df.columns[0]
+                    raw_df = (
+                        raw_df
+                        .sort_values(by=[date_col, '_order'], kind='stable')
+                        .set_index(date_col)
+                        .drop(columns=['_order'])
+                    )
+
+                new_df = raw_df
 
                 # Process new candles in order
                 for idx, row in new_df.iterrows():
                     if row.get('timeframe') == 'weekly':
-                        # Update EMA incrementally
-                        if context.last_ema21 and 'Close' in row:
+                        # Work on an explicit copy so mutation intent is clear
+                        row = row.copy()
+                        if context.last_ema21 is not None and 'Close' in row:
                             row['EMA21'] = incremental_ema(
                                 context.last_ema21,
                                 row['Close'],
                                 self.config.ema_weekly_period
                             )
 
-                        # Compute zone flags
+                        # Compute zone flags for this single row
                         row_df = pd.DataFrame([row])
                         row_df = compute_zone_flags(
                             row_df,
                             self.config.buy_zone_upper_pct,
                             self.config.downtrend_trigger_pct
                         )
-
-                        # Process through FSM
                         fsm.process_weekly_candle(row_df.iloc[0])
 
                     elif row.get('timeframe') == 'daily':
-                        # Update daily EMAs if needed
-                        if context.last_ema34 and 'Close' in row:
+                        row = row.copy()
+                        if context.last_ema34 is not None and 'Close' in row:
                             row['EMA34'] = incremental_ema(
                                 context.last_ema34,
                                 row['Close'],
                                 self.config.ema_daily_fast
                             )
-                        if context.last_ema55 and 'Close' in row:
+                        if context.last_ema55 is not None and 'Close' in row:
                             row['EMA55'] = incremental_ema(
                                 context.last_ema55,
                                 row['Close'],
                                 self.config.ema_daily_slow
                             )
-
-                        # Process through FSM
                         fsm.process_daily_candle(row)
 
                     # Update trades
@@ -232,19 +243,14 @@ class TrendRiderEngine:
         weekly_df['timeframe'] = 'weekly'
 
         # Compute indicators
-        weekly_df = enrich_with_indicators(
-            weekly_df,
-            self.config.ema_weekly_period,
-            self.config.ema_daily_fast,
-            self.config.ema_daily_slow
-        )
+        # Compute weekly EMA21 on weekly data only
+        from .indicators.ema_engine import compute_weekly_ema21, compute_daily_ema34, compute_daily_ema55
 
-        daily_df = enrich_with_indicators(
-            daily_df,
-            self.config.ema_weekly_period,
-            self.config.ema_daily_fast,
-            self.config.ema_daily_slow
-        )
+        weekly_df['EMA21'] = compute_weekly_ema21(weekly_df, self.config.ema_weekly_period)
+
+        # Compute daily EMA34 and EMA55 on daily data only
+        daily_df['EMA34'] = compute_daily_ema34(daily_df, self.config.ema_daily_fast)
+        daily_df['EMA55'] = compute_daily_ema55(daily_df, self.config.ema_daily_slow)
 
         # Compute zone flags
         weekly_df = compute_zone_flags(
@@ -255,6 +261,7 @@ class TrendRiderEngine:
 
         # Mark warmup complete
         weekly_df = mark_warmup_complete(weekly_df, self.config.warmup_weeks)
+        
 
         # Create FSM
         def signal_callback(signal: SignalEvent):
@@ -267,7 +274,24 @@ class TrendRiderEngine:
         self.fsm_instances[ticker] = fsm
 
         # Process chronologically - merge and sort all candles
-        all_candles = pd.concat([daily_df, weekly_df]).sort_index()
+        # Assign a secondary sort key so daily (0) always precedes weekly (1)
+        # on the same calendar date, which is required for correct intra-week
+        # signal detection (daily buy entry must be evaluated before the weekly
+        # state transition on the same Friday).
+        daily_df['_order'] = 0
+        weekly_df['_order'] = 1
+
+        all_candles = pd.concat([daily_df, weekly_df]).reset_index()
+
+        # The date column name may vary depending on yfinance version
+        date_col = 'Date' if 'Date' in all_candles.columns else all_candles.columns[0]
+
+        all_candles = (
+            all_candles
+            .sort_values(by=[date_col, '_order'], kind='stable')
+            .set_index(date_col)
+            .drop(columns=['_order'])
+        )
 
         for idx, row in all_candles.iterrows():
             if row['timeframe'] == 'weekly':
@@ -307,7 +331,16 @@ class TrendRiderEngine:
 
         fsm = StockFSM(ticker, self.config, signal_callback)
         fsm.context = context
-        fsm.state = context.current_state.name if hasattr(context.current_state, 'name') else context.current_state
+
+        # Use transitions library's set_state() to restore the persisted state
+        # without triggering any on_enter_ or on_exit_ callbacks, which would
+        # corrupt the already-restored context data.
+        target_state = (
+            context.current_state.name
+            if hasattr(context.current_state, 'name')
+            else str(context.current_state)
+        )
+        fsm.machine.set_state(target_state, model=fsm)
 
         self.fsm_instances[ticker] = fsm
         return fsm

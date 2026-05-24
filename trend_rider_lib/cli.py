@@ -10,10 +10,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from . import TrendRiderConfig, TrendRiderEngine, SQLiteProvider, YFinanceDownloader
-from .backtesting import StrategyBacktestWrapper
-from .core.enums import TradeStatus
-from .core.models import TradeRecord, StockContext
+from trend_rider_lib import TrendRiderConfig, TrendRiderEngine, SQLiteProvider, YFinanceDownloader
+from trend_rider_lib.backtesting import StrategyBacktestWrapper
+from trend_rider_lib.core.enums import TradeStatus, Classification, State
+from trend_rider_lib.core.models import TradeRecord, StockContext
 
 app = typer.Typer(help="Trend Rider command line interface")
 console = Console()
@@ -147,7 +147,7 @@ def scan(
         else:
             daily_data = loaded
             if tickers and set(tickers) != set(daily_data.keys()):
-                typer.echo("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
+                console.print("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
                 tickers = list(daily_data.keys())
     else:
         if not tickers:
@@ -155,7 +155,9 @@ def scan(
         end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         daily_data = YFinanceDownloader.download_bulk(tickers, start_date, end_date)
         if not daily_data:
-            raise typer.Exit(code=1, message="No download data returned from yfinance.")
+            # raise typer.Exit(code=1, message="No download data returned from yfinance.")
+            console.print("[bold red]No download data returned from yfinance.[/bold red]")
+            raise typer.Exit(code=1)
 
     results = engine.run_full_scan(tickers, daily_data)
     table = Table(title="Full Scan Results")
@@ -181,11 +183,15 @@ def update(
     provider = open_db(db_path)
     contexts = provider.load_all_contexts()
     if not contexts:
-        raise typer.Exit(code=1, message="No stored stock contexts found. Run scan first.")
+        # raise typer.Exit(code=1, message="No stored stock contexts found. Run scan first.")
+        console.print("[bold red]No stored stock contexts found. Run scan first.[/bold red]")
+        raise typer.Exit(code=1)
     if tickers:
         contexts = [ctx for ctx in contexts if ctx.ticker in tickers]
         if not contexts:
-            raise typer.Exit(code=1, message="No matching tickers found in persistence.")
+            # raise typer.Exit(code=1, message="No matching tickers found in persistence.")
+            console.print("[bold red]No matching tickers found in persistence.[/bold red]")
+            raise typer.Exit(code=1)
 
     engine = make_engine(db_path)
     updated = {}
@@ -238,7 +244,9 @@ def classify(
     if tickers:
         contexts = [ctx for ctx in contexts if ctx.ticker in tickers]
     if not contexts:
-        raise typer.Exit(code=1, message="No classification records found.")
+        # raise typer.Exit(code=1, message="No classification records found.")
+        console.print("[bold red]No classification records found.[/bold red]")
+        raise typer.Exit(code=1)
 
     table = Table(title="Current Classifications")
     table.add_column("Ticker", style="bold cyan")
@@ -257,6 +265,7 @@ def classify(
     console.print(table)
 
 
+# ✅ FIXED — rename all local usages of 'trades' inside the function body
 @app.command()
 def trades(
     ticker: Optional[str] = typer.Option(None, help="Optional ticker to filter trades."),
@@ -266,16 +275,16 @@ def trades(
     """Show open or closed trades from persistence."""
     provider = open_db(db_path)
     if status.lower() == "open":
-        trades = provider.get_open_trades(ticker)
+        trade_list = provider.get_open_trades(ticker)
     else:
         all_trades = provider.get_all_trades(ticker)
         if status.lower() == "closed":
-            trades = [trade for trade in all_trades if trade.status != TradeStatus.OPEN]
+            trade_list = [t for t in all_trades if t.status != TradeStatus.OPEN]
         else:
-            trades = all_trades
+            trade_list = all_trades
 
-    if not trades:
-        typer.echo("No matching trades found.")
+    if not trade_list:
+        console.print("[yellow]No matching trades found.[/yellow]")
         raise typer.Exit(code=0)
 
     table = Table(title=f"Trades ({status.title()})")
@@ -287,7 +296,8 @@ def trades(
     table.add_column("Exit Date", style="magenta")
     table.add_column("Exit Price", justify="right")
     table.add_column("P/L %", justify="right")
-    for trade in trades:
+
+    for trade in trade_list:                          # ← renamed here
         table.add_row(
             str(trade.id),
             trade.ticker,
@@ -299,7 +309,286 @@ def trades(
             f"{trade.profit_loss_pct:.2f}%",
         )
     console.print(table)
+    
+@app.command()
+def show(
+    db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
+    ticker: Optional[str] = typer.Option(None, help="Show detailed view for a single stock."),
+    filter_by: Optional[str] = typer.Option(
+        None,
+        "--filter",
+        help="Filter by classification: PRIME, PRIME_WAITLIST, MOMENTUM, MOMENTUM_WAITLIST, UNQUALIFIED",
+    ),
+    state_filter: Optional[str] = typer.Option(
+        None,
+        "--state",
+        help=(
+            "Filter by FSM state: WARMUP, OBSERVING, BUY_ZONE, UPTREND, "
+            "ABOVE_BUY_ZONE, DOWNTREND, RECOVERING"
+        ),
+    ),
+    sort_by: str = typer.Option(
+        "classification",
+        help="Sort by: ticker, classification, uptrend_weeks, state",
+    ),
+):
+    """
+    Display saved analysis results. Read-only — no download or re-analysis.
 
+    Use --ticker for a detailed single-stock view.
+    Use --filter to narrow by classification.
+    Use --state to narrow by FSM state.
+    """
+    provider = open_db(db_path)
+    contexts = provider.load_all_contexts()
+
+    if not contexts:
+        console.print(
+            "[bold red]No analysis found. Run [bold white]trendrider scan[/bold white] first.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
+    # ── Single stock detailed view ──────────────────────────────────────────
+    if ticker:
+        matched = [ctx for ctx in contexts if ctx.ticker.upper() == ticker.upper()]
+        if not matched:
+            console.print(f"[bold red]Ticker '{ticker}' not found in database.[/bold red]")
+            raise typer.Exit(code=1)
+
+        ctx = matched[0]
+
+        # Current status panel
+        status_table = Table(show_header=False, box=None, padding=(0, 2))
+        status_table.add_column("Field", style="bold")
+        status_table.add_column("Value")
+
+        state_name = (
+            ctx.current_state.name
+            if hasattr(ctx.current_state, "name")
+            else str(ctx.current_state)
+        )
+        classification_name = (
+            ctx.classification.name if ctx.classification else "UNKNOWN"
+        )
+
+        status_table.add_row("State", state_name)
+        status_table.add_row("Classification", classification_name)
+        status_table.add_row("TR Qualified", "✓ Yes" if ctx.tr_qualified else "✗ No")
+        status_table.add_row("In Buy Zone", "✓ Yes" if ctx.is_buyzone else "✗ No")
+        status_table.add_row(
+            "Last Updated",
+            ctx.last_update.isoformat() if ctx.last_update else "—",
+        )
+        console.print(
+            Panel(status_table, title=f"[bold cyan]{ctx.ticker}[/bold cyan] — {classification_name}", expand=False)
+        )
+
+        # Indicator values
+        indicator_table = Table(show_header=False, box=None, padding=(0, 2))
+        indicator_table.add_column("Field", style="bold")
+        indicator_table.add_column("Value")
+        indicator_table.add_row(
+            "Last Close",
+            f"{ctx.last_close:,.2f}" if ctx.last_close is not None else "—",
+        )
+        indicator_table.add_row(
+            "EMA21 (Weekly)",
+            f"{ctx.last_ema21:,.2f}" if ctx.last_ema21 is not None else "—",
+        )
+        indicator_table.add_row(
+            "EMA34 (Daily)",
+            f"{ctx.last_ema34:,.2f}" if ctx.last_ema34 is not None else "—",
+        )
+        indicator_table.add_row(
+            "EMA55 (Daily)",
+            f"{ctx.last_ema55:,.2f}" if ctx.last_ema55 is not None else "—",
+        )
+        console.print(Panel(indicator_table, title="Indicator Values", expand=False))
+
+        # Current uptrend
+        if ctx.current_uptrend:
+            up = ctx.current_uptrend
+            uptrend_table = Table(show_header=False, box=None, padding=(0, 2))
+            uptrend_table.add_column("Field", style="bold")
+            uptrend_table.add_column("Value")
+            uptrend_table.add_row(
+                "Started",
+                up.start_date.isoformat() if up.start_date else "—",
+            )
+            uptrend_table.add_row("Weeks", str(up.num_weeks))
+            uptrend_table.add_row(
+                "Closes Above EMA",
+                f"{up.pct_closes_above * 100:.1f}%" if up.pct_closes_above else "—",
+            )
+            uptrend_table.add_row(
+                "Strength",
+                up.strength.name if up.strength else "—",
+            )
+            uptrend_table.add_row(
+                "Highest Price",
+                f"{up.highest_price:,.2f} on {up.highest_price_date.isoformat()}"
+                if up.highest_price and up.highest_price_date
+                else "—",
+            )
+            uptrend_table.add_row(
+                "Lowest Price",
+                f"{up.lowest_price:,.2f} on {up.lowest_price_date.isoformat()}"
+                if up.lowest_price and up.lowest_price_date
+                else "—",
+            )
+            console.print(Panel(uptrend_table, title="Current Uptrend", expand=False))
+
+        # Uptrend history (last 5)
+        if ctx.uptrend_history:
+            history_table = Table(title="Uptrend History (last 5)")
+            history_table.add_column("Start", style="cyan")
+            history_table.add_column("End", style="cyan")
+            history_table.add_column("Weeks", justify="right")
+            history_table.add_column("% Above EMA", justify="right")
+            history_table.add_column("Strength")
+            for up in ctx.uptrend_history[-5:]:
+                history_table.add_row(
+                    up.start_date.isoformat() if up.start_date else "—",
+                    up.end_date.isoformat() if up.end_date else "ongoing",
+                    str(up.num_weeks),
+                    f"{up.pct_closes_above * 100:.1f}%" if up.pct_closes_above else "—",
+                    up.strength.name if up.strength else "—",
+                )
+            console.print(history_table)
+
+        # Recovery info
+        recovery_table = Table(show_header=False, box=None, padding=(0, 2))
+        recovery_table.add_column("Field", style="bold")
+        recovery_table.add_column("Value")
+        recovery_table.add_row(
+            "Crossover Detected",
+            "✓ Yes" if ctx.is_crossover_detected else "✗ No",
+        )
+        if ctx.is_crossover_detected and ctx.crossover_date:
+            recovery_table.add_row(
+                "Crossover Date",
+                ctx.crossover_date.isoformat(),
+            )
+            recovery_table.add_row(
+                "Crossover Price",
+                f"{ctx.crossover_price:,.2f}" if ctx.crossover_price else "—",
+            )
+        console.print(Panel(recovery_table, title="Recovery Info", expand=False))
+        return
+
+    # ── Full list view ──────────────────────────────────────────────────────
+
+    # Apply classification filter
+    if filter_by:
+        filter_upper = filter_by.upper()
+        contexts = [
+            ctx for ctx in contexts
+            if (ctx.classification.name if ctx.classification else "UNKNOWN") == filter_upper
+        ]
+
+    # Apply state filter
+    if state_filter:
+        state_upper = state_filter.upper()
+        contexts = [
+            ctx for ctx in contexts
+            if (
+                ctx.current_state.name
+                if hasattr(ctx.current_state, "name")
+                else str(ctx.current_state)
+            ).upper() == state_upper
+        ]
+
+    if not contexts:
+        console.print("[yellow]No stocks match the given filters.[/yellow]")
+        raise typer.Exit(code=0)
+
+    # Apply sort
+    sort_map = {
+        "ticker": lambda c: c.ticker,
+        "classification": lambda c: (c.classification.name if c.classification else ""),
+        "uptrend_weeks": lambda c: c.uptrend_weeks,
+        "state": lambda c: (
+            c.current_state.name if hasattr(c.current_state, "name") else str(c.current_state)
+        ),
+    }
+    sort_fn = sort_map.get(sort_by.lower(), sort_map["classification"])
+    contexts = sorted(contexts, key=sort_fn)
+
+    # Classification colour map
+    colour_map = {
+        "PRIME": "bold green",
+        "PRIME_WAITLIST": "green",
+        "MOMENTUM": "bold cyan",
+        "MOMENTUM_WAITLIST": "cyan",
+        "UNQUALIFIED": "dim",
+    }
+
+    table = Table(title="Stock Analysis Results")
+    table.add_column("Ticker", style="bold")
+    table.add_column("State")
+    table.add_column("Classification")
+    table.add_column("TR Qualified", justify="center")
+    table.add_column("In Buy Zone", justify="center")
+    table.add_column("Uptrend Weeks", justify="right")
+    table.add_column("EMA21", justify="right")
+    table.add_column("Last Close", justify="right")
+    table.add_column("Last Updated")
+
+    for ctx in contexts:
+        classification_name = (
+            ctx.classification.name if ctx.classification else "UNKNOWN"
+        )
+        state_name = (
+            ctx.current_state.name
+            if hasattr(ctx.current_state, "name")
+            else str(ctx.current_state)
+        )
+        row_style = colour_map.get(classification_name, "")
+        # Override: downtrend always red regardless of classification
+        if state_name == "DOWNTREND":
+            row_style = "red"
+
+        table.add_row(
+            ctx.ticker,
+            state_name,
+            classification_name,
+            "✓" if ctx.tr_qualified else "✗",
+            "✓" if ctx.is_buyzone else "✗",
+            str(ctx.uptrend_weeks),
+            f"{ctx.last_ema21:,.2f}" if ctx.last_ema21 is not None else "—",
+            f"{ctx.last_close:,.2f}" if ctx.last_close is not None else "—",
+            ctx.last_update.isoformat() if ctx.last_update else "—",
+            style=row_style,
+        )
+
+    console.print(table)
+
+    # Summary panel
+    from collections import Counter
+    classification_counts = Counter(
+        ctx.classification.name if ctx.classification else "UNKNOWN"
+        for ctx in contexts
+    )
+    in_buyzone = sum(1 for ctx in contexts if ctx.is_buyzone)
+    in_downtrend = sum(
+        1 for ctx in contexts
+        if (
+            ctx.current_state.name
+            if hasattr(ctx.current_state, "name")
+            else str(ctx.current_state)
+        ) == "DOWNTREND"
+    )
+
+    summary_lines = [
+        f"[bold]Total Stocks:[/bold] {len(contexts)}",
+        f"[bold green]PRIME:[/bold green] {classification_counts.get('PRIME', 0)}   "
+        f"[green]PRIME WAITLIST:[/green] {classification_counts.get('PRIME_WAITLIST', 0)}",
+        f"[bold cyan]MOMENTUM:[/bold cyan] {classification_counts.get('MOMENTUM', 0)}   "
+        f"[cyan]MOMENTUM WAITLIST:[/cyan] {classification_counts.get('MOMENTUM_WAITLIST', 0)}",
+        f"[dim]UNQUALIFIED:[/dim] {classification_counts.get('UNQUALIFIED', 0)}",
+        f"[bold]In Buy Zone:[/bold] {in_buyzone}   [red]In Downtrend:[/red] {in_downtrend}",
+    ]
+    console.print(Panel("\n".join(summary_lines), title="Summary", expand=False))
 
 @app.command()
 def report(
@@ -313,7 +602,9 @@ def report(
     if tickers:
         contexts = [ctx for ctx in contexts if ctx.ticker in tickers]
     if not contexts:
-        raise typer.Exit(code=1, message="No data available for report.")
+        # raise typer.Exit(code=1, message="No data available for report.")
+        console.print("[bold red]No data available for report.[/bold red]")
+        raise typer.Exit(code=1)
 
     classification_rows = [context_to_row(ctx) for ctx in contexts]
     classification_df = pd.DataFrame(classification_rows)
@@ -387,13 +678,15 @@ def backtest(
         else:
             daily_data = loaded
             if tickers and set(tickers) != set(daily_data.keys()):
-                typer.echo("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
+                console.print("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
                 tickers = list(daily_data.keys())
     else:
         end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         daily_data = YFinanceDownloader.download_bulk(tickers, start_date, end_date)
         if not daily_data:
-            raise typer.Exit(code=1, message="No historical data returned from yfinance.")
+            # raise typer.Exit(code=1, message="No historical data returned from yfinance.")
+            console.print("[bold red]No historical data returned from yfinance.[/bold red]")
+            raise typer.Exit(code=1)
 
     wrapper = StrategyBacktestWrapper(engine, tickers, daily_data)
     report_path = wrapper.run(output)
@@ -404,13 +697,22 @@ def backtest(
 def clean(
     ticker: str = typer.Argument(..., help="Ticker to clean all data for."),
     db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ):
     """Delete all persisted data for a ticker (contexts, signals, trades)."""
+    if not yes:
+        confirmed = typer.confirm(
+            f"This will permanently delete all data for '{ticker}'. Continue?"
+        )
+        if not confirmed:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(code=0)
+
     provider = open_db(db_path)
     provider.delete_context(ticker)
     provider.delete_signals(ticker)
     provider.delete_trades(ticker)
-    console.print(f"All data for ticker '{ticker}' has been removed from {db_path}")
+    console.print(f"[green]All data for ticker '[bold]{ticker}[/bold]' has been removed from {db_path}[/green]")
 
 if __name__ == "__main__":
     app()

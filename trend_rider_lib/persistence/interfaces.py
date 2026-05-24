@@ -104,6 +104,17 @@ class ISignalStore(ABC):
             Most recent matching signal, or None
         """
         pass
+    
+    @abstractmethod
+    def delete_signals(self, ticker: str) -> None:
+        """Delete all signals for a ticker."""
+        pass
+
+    # Add to ITradeStore
+    @abstractmethod
+    def delete_trades(self, ticker: str) -> None:
+        """Delete all trades for a ticker."""
+        pass
 
 
 class ITradeStore(ABC):

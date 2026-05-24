@@ -28,6 +28,14 @@ pip install -e .
 
 ## Quick Start
 
+### Run commands
+
+`python -m trend_rider_lib scan TIINDIA.NS --start-date 2017-10-29 --end-date 2026-05-23`
+`python -m trend_rider_lib show`
+`python -m trend_rider_lib report`
+`python -m trend_rider_lib clean TIINDIA.NS`
+
+
 ### 1. Download Market Data
 
 ```python

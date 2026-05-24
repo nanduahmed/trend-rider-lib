@@ -56,3 +56,5 @@ dmypy.json
 
 # Pyre
 .pyre/
+trend_rider_report.xlsx
+trend_rider.sqlite
