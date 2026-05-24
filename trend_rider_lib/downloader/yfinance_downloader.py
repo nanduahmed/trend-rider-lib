@@ -1,6 +1,7 @@
 """
 Data downloader wrapper for yfinance.
 """
+import logging
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 import pandas as pd
@@ -11,6 +12,9 @@ except ImportError:
     raise ImportError(
         "yfinance is required. Install with: pip install yfinance"
     )
+
+
+logger = logging.getLogger(__name__)
 
 
 class YFinanceDownloader:
@@ -59,7 +63,7 @@ class YFinanceDownloader:
             return df
 
         except Exception as e:
-            print(f"Error downloading {ticker}: {e}")
+            logger.warning("Error downloading %s: %s", ticker, e)
             return pd.DataFrame()
 
     @staticmethod
@@ -106,7 +110,7 @@ class YFinanceDownloader:
             return df
 
         except Exception as e:
-            print(f"Error downloading incremental data for {ticker}: {e}")
+            logger.warning("Error downloading incremental data for %s: %s", ticker, e)
             return pd.DataFrame()
 
     @staticmethod

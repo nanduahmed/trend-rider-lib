@@ -175,6 +175,49 @@ class TestFSMUptrendQualification:
         # Should be TR qualified
         assert fsm.context.tr_qualified
 
+    def test_uptrend_weeks_continue_while_in_buy_zone(self, fsm, config):
+        """Uptrend week counting should continue after returning to BUY_ZONE."""
+        base_date = datetime(2023, 1, 1)
+
+        for i in range(config.warmup_weeks):
+            row = create_weekly_row(base_date + timedelta(weeks=i), 100.0, 100.0)
+            fsm.process_weekly_candle(row)
+
+        entry_row = create_weekly_row(
+            base_date + timedelta(weeks=config.warmup_weeks),
+            102.0,
+            100.0
+        )
+        fsm.process_weekly_candle(entry_row)
+
+        daily_row = create_daily_row(
+            base_date + timedelta(weeks=config.warmup_weeks, days=1),
+            103.0,
+            102.0,
+            101.0
+        )
+        fsm.process_daily_candle(daily_row)
+
+        first_buyzone_week = create_weekly_row(
+            base_date + timedelta(weeks=config.warmup_weeks + 1),
+            101.0,
+            100.0
+        )
+        fsm.process_weekly_candle(first_buyzone_week)
+
+        assert fsm.state == State.BUY_ZONE.name
+        assert fsm.context.uptrend_weeks == 1
+
+        second_buyzone_week = create_weekly_row(
+            base_date + timedelta(weeks=config.warmup_weeks + 2),
+            101.5,
+            100.0
+        )
+        fsm.process_weekly_candle(second_buyzone_week)
+
+        assert fsm.state == State.BUY_ZONE.name
+        assert fsm.context.uptrend_weeks == 2
+
 
 class TestFSMDowntrend:
     """Test downtrend trigger and recovery."""

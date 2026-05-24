@@ -41,8 +41,6 @@ def classify_stock(context: StockContext) -> Classification:
         else:
             return Classification.MOMENTUM_WAITLIST
 
-    # Building toward prime (in original uptrend but < 40 weeks)
-    # This shouldn't normally happen for tr_qualified stocks
     return Classification.UNQUALIFIED
 
 

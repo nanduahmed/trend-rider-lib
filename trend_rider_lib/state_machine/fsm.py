@@ -201,8 +201,12 @@ class StockFSM:
 
             self.context.is_buyzone = (close > ema21) and (close <= upper_bound)
 
-            # Track uptrend statistics if in uptrend or above buy zone
-            if self.state in [State.UPTREND.name, State.ABOVE_BUY_ZONE.name]:
+            # Track uptrend statistics only once an uptrend has started.
+            if self.context.current_uptrend and self.state in [
+                State.BUY_ZONE.name,
+                State.UPTREND.name,
+                State.ABOVE_BUY_ZONE.name,
+            ]:
                 self.context.uptrend_weeks += 1
                 if close > ema21:
                     self.context.closes_above_ema += 1
@@ -227,19 +231,19 @@ class StockFSM:
                             self.context.closes_above_ema / self.context.uptrend_weeks
                         )
 
-                    # Track high/low
+                    # Track weekly extreme prices for the active uptrend.
                     if (
                         self.context.current_uptrend.highest_price is None
-                        or close > self.context.current_uptrend.highest_price
+                        or row['High'] > self.context.current_uptrend.highest_price
                     ):
-                        self.context.current_uptrend.highest_price = close
+                        self.context.current_uptrend.highest_price = row['High']
                         self.context.current_uptrend.highest_price_date = row.name
 
                     if (
                         self.context.current_uptrend.lowest_price is None
-                        or close < self.context.current_uptrend.lowest_price
+                        or row['Low'] < self.context.current_uptrend.lowest_price
                     ):
-                        self.context.current_uptrend.lowest_price = close
+                        self.context.current_uptrend.lowest_price = row['Low']
                         self.context.current_uptrend.lowest_price_date = row.name
 
         # Handle state transitions based on current state
@@ -263,7 +267,7 @@ class StockFSM:
                 self.enter_downtrend()
             elif self.is_above_buyzone():
                 self.leave_buyzone()
-            elif self.is_in_buyzone() and self.context.tr_qualified:
+            elif self.is_in_buyzone():
                 self.reenter_buyzone()
 
         elif self.state == State.ABOVE_BUY_ZONE.name:
@@ -293,6 +297,7 @@ class StockFSM:
         # Check for uptrend start from buy zone
         if (
             self.state == State.BUY_ZONE.name
+            and self.context.current_uptrend is None
             and pd.notna(self.context.last_ema21)
             and row['Close'] > self.context.last_ema21
         ):
@@ -393,9 +398,11 @@ class StockFSM:
 
     def on_failed_recovery(self) -> None:
         """Callback when recovery fails and re-enters downtrend."""
+        self.context.is_buyzone = False
         self.context.is_crossover_detected = False
         self.context.crossover_date = None
         self.context.crossover_price = None
+        self.emit_signal(SignalType.DOWNTREND_START)
 
     def emit_signal(
         self,

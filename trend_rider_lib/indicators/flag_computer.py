@@ -68,10 +68,10 @@ def mark_warmup_complete(df: pd.DataFrame, warmup_weeks: int = 25) -> pd.DataFra
     df = df.copy()
     df['warmup_complete'] = False
 
-    weekly_rows = df[df['timeframe'] == 'weekly']
-    if len(weekly_rows) >= warmup_weeks:
-        # Mark all rows after warmup period complete
-        warmup_date = weekly_rows.iloc[warmup_weeks - 1].name
-        df.loc[df.index >= warmup_date, 'warmup_complete'] = True
+    weekly_index = df.index[df['timeframe'] == 'weekly']
+    if len(weekly_index) >= warmup_weeks:
+        # Mark only weekly rows after the warmup window as complete.
+        warmup_end_index = weekly_index[warmup_weeks:]
+        df.loc[df.index.isin(warmup_end_index), 'warmup_complete'] = True
 
     return df

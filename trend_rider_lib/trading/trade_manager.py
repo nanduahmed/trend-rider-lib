@@ -1,7 +1,7 @@
 """
 Trade lifecycle management with entry, tracking, and exit.
 """
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Iterable
 from datetime import datetime
 
 from ..core.models import TradeRecord, SignalEvent
@@ -28,6 +28,32 @@ class TradeManager:
         self.open_trades: Dict[str, List[TradeRecord]] = {}
         self.all_trades: List[TradeRecord] = []
         self.trade_id_counter = 0
+
+    def reset(self) -> None:
+        """Reset in-memory trade tracking state."""
+        self.open_trades = {}
+        self.all_trades = []
+        self.trade_id_counter = 0
+
+    def seed_trade_id_counter(self, trades: Iterable[TradeRecord]) -> None:
+        """Seed the ID counter from existing persisted trades."""
+        max_id = max((trade.id or 0 for trade in trades), default=0)
+        self.trade_id_counter = max(self.trade_id_counter, max_id)
+
+    def restore_from_trades(self, trades: List[TradeRecord]) -> None:
+        """
+        Restore in-memory state from persisted trades.
+
+        Open trades are loaded into the active tracker; all trades are kept for
+        history/performance calculations.
+        """
+        self.reset()
+        self.all_trades = list(trades)
+        for trade in trades:
+            if trade.id is not None:
+                self.trade_id_counter = max(self.trade_id_counter, trade.id)
+            if trade.status == TradeStatus.OPEN:
+                self.open_trades.setdefault(trade.ticker, []).append(trade)
 
     def process_signal(
         self,
@@ -135,7 +161,7 @@ class TradeManager:
                 trade.highest_price_seen = current_price
 
             # Update trailing stop loss
-            trade.current_sl, steps = self.tsl_engine.calculate_tsl(
+            trade.current_sl, _steps = self.tsl_engine.calculate_tsl(
                 trade.entry_price,
                 trade.highest_price_seen,
                 current_price

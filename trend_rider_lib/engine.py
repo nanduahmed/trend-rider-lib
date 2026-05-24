@@ -2,6 +2,7 @@
 Main Trend Rider engine orchestrating all modules.
 """
 from typing import Dict, List, Optional
+import logging
 import pandas as pd
 from datetime import datetime
 
@@ -21,6 +22,9 @@ from .signals.signal_engine import SignalEngine
 from .trading.trade_manager import TradeManager
 
 from .persistence.interfaces import IStateStore, ISignalStore, ITradeStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class TrendRiderEngine:
@@ -74,21 +78,19 @@ class TrendRiderEngine:
             Dictionary of ticker → final StockContext
         """
         results = {}
+        self.trade_manager.reset()
+        self.trade_manager.seed_trade_id_counter(self.trade_store.get_all_trades())
 
         for ticker in tickers:
             if ticker not in daily_data:
-                print(f"Warning: No data provided for {ticker}")
+                logger.warning("No data provided for %s", ticker)
                 continue
 
-            daily_df = daily_data[ticker]
+            daily_df = daily_data[ticker].copy()
             context = self._process_full_history(ticker, daily_df)
 
             # Save final state
             self.state_store.save_context(context)
-
-            # Save open trades
-            for trade in self.trade_manager.get_open_trades(ticker):
-                self.trade_store.save_trade(trade)
 
             results[ticker] = context
 
@@ -111,12 +113,14 @@ class TrendRiderEngine:
             Dictionary of ticker → updated StockContext
         """
         results = {}
+        persisted_trades = self.trade_store.get_all_trades()
+        self.trade_manager.restore_from_trades(persisted_trades)
 
         for ticker in tickers:
             # Load existing context
             context = self.state_store.load_context(ticker)
             if not context:
-                print(f"Warning: No existing context for {ticker}. Run full scan first.")
+                logger.warning("No existing context for %s. Run full scan first.", ticker)
                 continue
 
             # Restore FSM with loaded context
@@ -236,7 +240,8 @@ class TrendRiderEngine:
             Processed StockContext
         """
         # Resample to weekly
-        weekly_df = resample_daily_to_weekly(daily_df)
+        daily_df = daily_df.copy()
+        weekly_df = resample_daily_to_weekly(daily_df).copy()
 
         # Add timeframe column
         daily_df['timeframe'] = 'daily'
@@ -262,7 +267,7 @@ class TrendRiderEngine:
         # Mark warmup complete
         weekly_df = mark_warmup_complete(weekly_df, self.config.warmup_weeks)
         
-
+        
         # Create FSM
         def signal_callback(signal: SignalEvent):
             self.signal_engine.process_signal(signal)

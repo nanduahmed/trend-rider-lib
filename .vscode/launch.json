@@ -12,11 +12,11 @@
             "module": "trend_rider_lib",
             "args": [
                 "scan",
-                "TIINDIA.NS",
+                "TECHNOE.NS",
                 "--start-date",
                 "2017-10-30",
                 "--end-date",
-                "2024-08-24",
+                "2025-01-01",
             ],
         }
     ]

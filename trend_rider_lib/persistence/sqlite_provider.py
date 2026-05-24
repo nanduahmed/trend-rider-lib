@@ -1,6 +1,7 @@
 """
 SQLite persistence provider implementation.
 """
+import logging
 import sqlite3
 import json
 from typing import List, Optional
@@ -8,8 +9,11 @@ from datetime import datetime
 
 from ..core.models import StockContext, SignalEvent, TradeRecord
 from ..state_machine.fsm_serializer import serialize_context, deserialize_context
-from ..core.enums import TradeStatus
+from ..core.enums import TradeStatus, SignalType, ExitReason
 from .interfaces import IStateStore, ISignalStore, ITradeStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
@@ -171,17 +175,17 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
             conn.commit()
 
     def delete_signals(self, ticker: str) -> None:
-        """Delete all signals for a ticker."""
+        """Delete all signal records for a ticker."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM signals WHERE ticker = ?', (ticker,))
+            cursor.execute("DELETE FROM signals WHERE ticker = ?", (ticker,))
             conn.commit()
 
     def delete_trades(self, ticker: str) -> None:
-        """Delete all trades for a ticker."""
+        """Delete all trade records for a ticker."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM trades WHERE ticker = ?', (ticker,))
+            cursor.execute("DELETE FROM trades WHERE ticker = ?", (ticker,))
             conn.commit()
 
     # ISignalStore implementation
@@ -195,7 +199,7 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 signal.ticker,
-                signal.signal_type.name,
+                signal.signal_type.name if isinstance(signal.signal_type, SignalType) else signal.signal_type,
                 signal.date.isoformat() if signal.date else None,
                 signal.close_price,
                 signal.ema21,
@@ -211,19 +215,33 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
         signal_type: Optional[str] = None,
         from_date: Optional[str] = None
     ) -> List[SignalEvent]:
-        """Get signals with optional filters (minimal implementation)."""
-        # Minimal implementation: just get by ticker
+        """Get signals with optional filters."""
+        query = '''
+            SELECT ticker, signal_type, date, close_price, ema21, ema34, ema55, metadata_json
+            FROM signals
+            WHERE ticker = ?
+        '''
+        params = [ticker]
+
+        if signal_type:
+            signal_name = signal_type.name if isinstance(signal_type, SignalType) else signal_type
+            query += ' AND signal_type = ?'
+            params.append(signal_name)
+
+        if from_date:
+            query += ' AND date >= ?'
+            params.append(from_date)
+
+        query += ' ORDER BY date ASC'
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT ticker, signal_type, date, close_price, ema21, ema34, ema55, metadata_json FROM signals WHERE ticker = ?',
-                (ticker,)
-            )
+            cursor.execute(query, params)
             signals = []
             for row in cursor.fetchall():
                 signal = SignalEvent(
                     ticker=row[0],
-                    signal_type=row[1],
+                    signal_type=SignalType[row[1]] if row[1] else None,
                     date=datetime.fromisoformat(row[2]) if row[2] else datetime.now(),
                     close_price=row[3],
                     ema21=row[4],
@@ -239,19 +257,28 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
         ticker: str,
         signal_type: Optional[str] = None
     ) -> Optional[SignalEvent]:
-        """Get most recent signal for ticker (minimal implementation)."""
+        """Get most recent signal for ticker."""
+        query = '''
+            SELECT ticker, signal_type, date, close_price, ema21, ema34, ema55, metadata_json
+            FROM signals
+            WHERE ticker = ?
+        '''
+        params = [ticker]
+        if signal_type:
+            signal_name = signal_type.name if isinstance(signal_type, SignalType) else signal_type
+            query += ' AND signal_type = ?'
+            params.append(signal_name)
+        query += ' ORDER BY date DESC LIMIT 1'
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                'SELECT ticker, signal_type, date, close_price, ema21, ema34, ema55, metadata_json FROM signals WHERE ticker = ? ORDER BY date DESC LIMIT 1',
-                (ticker,)
-            )
+            cursor.execute(query, params)
             row = cursor.fetchone()
 
             if row:
                 return SignalEvent(
                     ticker=row[0],
-                    signal_type=row[1],
+                    signal_type=SignalType[row[1]] if row[1] else None,
                     date=datetime.fromisoformat(row[2]) if row[2] else datetime.now(),
                     close_price=row[3],
                     ema21=row[4],
@@ -291,7 +318,7 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                 ))
                 conn.commit()
         except sqlite3.IntegrityError as e:
-            print(f"Error saving trade with ID {trade.id}: {e}")
+            logger.warning("Error saving trade with ID %s: %s", trade.id, e)
 
     def update_trade(self, trade: TradeRecord) -> None:
         """Update existing trade."""
@@ -324,12 +351,12 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
             cursor = conn.cursor()
             if ticker:
                 cursor.execute(
-                    'SELECT * FROM trades WHERE status = ? AND ticker = ?',
+                    'SELECT * FROM trades WHERE status = ? AND ticker = ? ORDER BY id ASC',
                     (TradeStatus.OPEN.name, ticker)
                 )
             else:
                 cursor.execute(
-                    'SELECT * FROM trades WHERE status = ?',
+                    'SELECT * FROM trades WHERE status = ? ORDER BY id ASC',
                     (TradeStatus.OPEN.name,)
                 )
             return self._rows_to_trades(cursor.fetchall())
@@ -339,9 +366,9 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if ticker:
-                cursor.execute('SELECT * FROM trades WHERE ticker = ?', (ticker,))
+                cursor.execute('SELECT * FROM trades WHERE ticker = ? ORDER BY id ASC', (ticker,))
             else:
-                cursor.execute('SELECT * FROM trades')
+                cursor.execute('SELECT * FROM trades ORDER BY id ASC')
             return self._rows_to_trades(cursor.fetchall())
 
     def get_trade_by_id(self, trade_id: int) -> Optional[TradeRecord]:
@@ -373,7 +400,7 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                 highest_price_seen=row[9],
                 tsl_step_pct=row[10],
                 status=TradeStatus[row[11]] if row[11] else TradeStatus.OPEN,
-                exit_reason=None,  # TODO: parse exit_reason
+                exit_reason=ExitReason[row[12]] if row[12] else None,
                 profit_loss_pct=row[13]
             )
             trades.append(trade)

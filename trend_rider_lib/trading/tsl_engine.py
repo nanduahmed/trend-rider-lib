@@ -1,6 +1,7 @@
 """
 Trailing Stop Loss engine for trade management.
 """
+from math import floor
 from typing import Tuple
 
 from ..core.config import TrendRiderConfig
@@ -52,15 +53,17 @@ class TSLEngine:
         # Calculate how many steps have been achieved
         price_gain = highest_price - entry_price
         price_gain_pct = price_gain / entry_price
-        steps_achieved = int(price_gain_pct / tsl_step_pct)
+        steps_achieved = floor((price_gain_pct / tsl_step_pct) + 1e-12)
 
         if steps_achieved == 0:
             # Still at initial SL
             current_sl = entry_price * (1 - initial_sl_pct)
         else:
-            # Trail the SL based on steps achieved
-            # Each step moves SL up by tsl_step_pct from entry
+            # Trail the SL based on steps achieved.
+            # Each step moves SL up by tsl_step_pct from entry.
             current_sl = entry_price * (1 + (steps_achieved - 1) * tsl_step_pct)
+
+        current_sl = round(current_sl, 10)
 
         return current_sl, steps_achieved
 
