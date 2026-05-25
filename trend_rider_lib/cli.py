@@ -14,11 +14,21 @@ from trend_rider_lib import TrendRiderConfig, TrendRiderEngine, SQLiteProvider, 
 from trend_rider_lib.backtesting import StrategyBacktestWrapper
 from trend_rider_lib.core.enums import TradeStatus, Classification, State
 from trend_rider_lib.core.models import TradeRecord, StockContext
+from trend_rider_lib.reporting.export_utils import (
+    SIGNAL_ROW_FILL_MAP,
+    SheetFormat,
+    build_signal_rows,
+    load_debug_csv_frames,
+    safe_filename_part,
+    write_debug_csv,
+    write_excel_workbook,
+)
 
 app = typer.Typer(help="Trend Rider command line interface")
 console = Console()
 
 DEFAULT_DB = Path("trend_rider.sqlite")
+DEFAULT_CACHE_DIR = Path("data/cache/output")
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -90,9 +100,9 @@ def build_trade_rows(trades: List[TradeRecord]) -> List[Dict[str, str]]:
             "ID": trade.id,
             "Ticker": trade.ticker,
             "Status": trade.status.name if trade.status else "UNKNOWN",
-            "Entry Date": trade.entry_date.isoformat() if trade.entry_date else "",
+            "Entry Date": trade.entry_date,
             "Entry Price": trade.entry_price,
-            "Exit Date": trade.exit_date.isoformat() if trade.exit_date else "",
+            "Exit Date": trade.exit_date,
             "Exit Price": trade.exit_price,
             "Profit/Loss %": trade.profit_loss_pct,
             "Initial SL": trade.initial_sl,
@@ -111,13 +121,56 @@ def context_to_row(context: StockContext) -> Dict[str, str]:
         "TR Qualified": "Yes" if context.tr_qualified else "No",
         "Buy Zone": "Yes" if context.is_buyzone else "No",
         "Last Close": context.last_close,
-        "Last Update": context.last_update.isoformat() if context.last_update else "",
+        "Last Update": context.last_update,
         "Uptrend Weeks": context.uptrend_weeks,
     }
 
 
+def build_uptrend_rows(contexts: List[StockContext]) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    for ctx in contexts:
+        all_uptrends = list(ctx.uptrend_history)
+        if ctx.current_uptrend:
+            all_uptrends.append(ctx.current_uptrend)
+        for up in all_uptrends:
+            rows.append({
+                "Ticker": ctx.ticker,
+                "Classification": ctx.classification.name if ctx.classification else "",
+                "Start Date": up.start_date,
+                "End Date": up.end_date,
+                "Weeks": up.num_weeks,
+                "Pct Closes Above": (up.pct_closes_above * 100) if up.pct_closes_above is not None else None,
+                "Strength": up.strength.name if up.strength else "",
+                "Highest Price": up.highest_price,
+                "Highest Price Date": up.highest_price_date,
+                "Lowest Price": up.lowest_price,
+                "Lowest Price Date": up.lowest_price_date,
+            })
+
+    if not rows:
+        rows.append({
+            "Ticker": "",
+            "Classification": "",
+            "Start Date": None,
+            "End Date": None,
+            "Weeks": None,
+            "Pct Closes Above": None,
+            "Strength": "",
+            "Highest Price": None,
+            "Highest Price Date": None,
+            "Lowest Price": None,
+            "Lowest Price Date": None,
+        })
+
+    return rows
+
+
 def open_db(db_path: Path) -> SQLiteProvider:
     return SQLiteProvider(str(db_path))
+
+
+def format_report_date(value: Optional[datetime]) -> str:
+    return value.strftime("%Y-%m-%d") if value else ""
 
 
 def make_engine(db_path: Path) -> TrendRiderEngine:
@@ -126,13 +179,23 @@ def make_engine(db_path: Path) -> TrendRiderEngine:
     return TrendRiderEngine(config, provider, provider, provider)
 
 
+def build_debug_csv_callback(cache_dir: Path):
+    """Create a callback that persists analysis debug rows per ticker."""
+    def _write_debug_csv(ticker: str, frame: pd.DataFrame) -> None:
+        debug_path = cache_dir / f"{safe_filename_part(ticker)}_analysis_debug.csv"
+        write_debug_csv(debug_path, frame)
+
+    return _write_debug_csv
+
+
 @app.command()
 def scan(
     tickers: List[str] = typer.Argument(..., help="Stock tickers to scan."),
     db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
-    start_date: str = typer.Option("2000-01-01", help="Start date for historical download."),
+    start_date: Optional[str] = typer.Option(None, help="Start date for historical download. Omit for full history."),
     end_date: Optional[str] = typer.Option(None, help="End date for historical download."),
     data_file: Optional[Path] = typer.Option(None, help="Optional CSV/XLSX/Parquet file containing OHLCV data."),
+    debug_csv: bool = typer.Option(False, "--debug-csv", help="Persist raw analysis CSV output in the cache directory."),
 ):
     """Run a full historical scan for the given tickers."""
     engine = make_engine(db_path)
@@ -152,14 +215,14 @@ def scan(
     else:
         if not tickers:
             raise typer.BadParameter("At least one ticker is required when no data file is provided.")
-        end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         daily_data = YFinanceDownloader.download_bulk(tickers, start_date, end_date)
         if not daily_data:
             # raise typer.Exit(code=1, message="No download data returned from yfinance.")
             console.print("[bold red]No download data returned from yfinance.[/bold red]")
             raise typer.Exit(code=1)
 
-    results = engine.run_full_scan(tickers, daily_data)
+    debug_callback = build_debug_csv_callback(DEFAULT_CACHE_DIR) if debug_csv else None
+    results = engine.run_full_scan(tickers, daily_data, debug_callback=debug_callback)
     table = Table(title="Full Scan Results")
     table.add_column("Ticker", style="bold cyan")
     table.add_column("Classification", style="green")
@@ -168,7 +231,7 @@ def scan(
         table.add_row(
             ticker,
             context.classification.name if context.classification else "UNKNOWN",
-            context.last_update.isoformat() if context.last_update else "",
+            format_report_date(context.last_update),
         )
     console.print(table)
     console.print(Panel(f"Scan complete. Persisted results to {db_path}", style="green"))
@@ -227,7 +290,7 @@ def update(
             table.add_row(
                 ticker,
                 context.classification.name if context.classification else "UNKNOWN",
-                context.last_update.isoformat() if context.last_update else "",
+                format_report_date(context.last_update),
             )
         console.print(table)
     console.print(Panel(f"Update complete. Persisted results to {db_path}", style="green"))
@@ -260,7 +323,7 @@ def classify(
             context.classification.name if context.classification else "UNKNOWN",
             context.current_state.name if hasattr(context.current_state, "name") else str(context.current_state),
             "Yes" if context.tr_qualified else "No",
-            context.last_update.isoformat() if context.last_update else "",
+            format_report_date(context.last_update),
         )
     console.print(table)
 
@@ -302,9 +365,9 @@ def trades(
             str(trade.id),
             trade.ticker,
             trade.status.name if trade.status else "UNKNOWN",
-            trade.entry_date.isoformat() if trade.entry_date else "",
+            format_report_date(trade.entry_date),
             f"{trade.entry_price:.2f}",
-            trade.exit_date.isoformat() if trade.exit_date else "",
+            format_report_date(trade.exit_date),
             f"{trade.exit_price:.2f}" if trade.exit_price else "",
             f"{trade.profit_loss_pct:.2f}%",
         )
@@ -377,7 +440,7 @@ def show(
         status_table.add_row("In Buy Zone", "✓ Yes" if ctx.is_buyzone else "✗ No")
         status_table.add_row(
             "Last Updated",
-            ctx.last_update.isoformat() if ctx.last_update else "—",
+            format_report_date(ctx.last_update) or "—",
         )
         console.print(
             Panel(status_table, title=f"[bold cyan]{ctx.ticker}[/bold cyan] — {classification_name}", expand=False)
@@ -413,12 +476,12 @@ def show(
             uptrend_table.add_column("Value")
             uptrend_table.add_row(
                 "Started",
-                up.start_date.isoformat() if up.start_date else "—",
+                format_report_date(up.start_date) or "—",
             )
             uptrend_table.add_row("Weeks", str(up.num_weeks))
             uptrend_table.add_row(
                 "Closes Above EMA",
-                f"{up.pct_closes_above * 100:.1f}%" if up.pct_closes_above else "—",
+                f"{up.pct_closes_above * 100:.2f}%" if up.pct_closes_above else "—",
             )
             uptrend_table.add_row(
                 "Strength",
@@ -426,13 +489,13 @@ def show(
             )
             uptrend_table.add_row(
                 "Highest Price",
-                f"{up.highest_price:,.2f} on {up.highest_price_date.isoformat()}"
+                f"{up.highest_price:,.2f} on {format_report_date(up.highest_price_date)}"
                 if up.highest_price and up.highest_price_date
                 else "—",
             )
             uptrend_table.add_row(
                 "Lowest Price",
-                f"{up.lowest_price:,.2f} on {up.lowest_price_date.isoformat()}"
+                f"{up.lowest_price:,.2f} on {format_report_date(up.lowest_price_date)}"
                 if up.lowest_price and up.lowest_price_date
                 else "—",
             )
@@ -448,10 +511,10 @@ def show(
             history_table.add_column("Strength")
             for up in ctx.uptrend_history[-5:]:
                 history_table.add_row(
-                    up.start_date.isoformat() if up.start_date else "—",
-                    up.end_date.isoformat() if up.end_date else "ongoing",
+                    format_report_date(up.start_date) or "—",
+                    format_report_date(up.end_date) or "ongoing",
                     str(up.num_weeks),
-                    f"{up.pct_closes_above * 100:.1f}%" if up.pct_closes_above else "—",
+                    f"{up.pct_closes_above * 100:.2f}%" if up.pct_closes_above else "—",
                     up.strength.name if up.strength else "—",
                 )
             console.print(history_table)
@@ -467,7 +530,7 @@ def show(
         if ctx.is_crossover_detected and ctx.crossover_date:
             recovery_table.add_row(
                 "Crossover Date",
-                ctx.crossover_date.isoformat(),
+                format_report_date(ctx.crossover_date),
             )
             recovery_table.add_row(
                 "Crossover Price",
@@ -557,7 +620,7 @@ def show(
             str(ctx.uptrend_weeks),
             f"{ctx.last_ema21:,.2f}" if ctx.last_ema21 is not None else "—",
             f"{ctx.last_close:,.2f}" if ctx.last_close is not None else "—",
-            ctx.last_update.isoformat() if ctx.last_update else "—",
+            format_report_date(ctx.last_update) or "—",
             style=row_style,
         )
 
@@ -595,6 +658,7 @@ def report(
     output: Path = typer.Option(Path("trend_rider_report.xlsx"), help="Output XLSX report path."),
     db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
     tickers: Optional[List[str]] = typer.Argument(None, help="Optional tickers to include in the report."),
+    include_debug_csv: bool = typer.Option(False, "--include-debug-csv", help="Include cached raw analysis CSV data as a separate workbook tab."),
 ):
     """Generate an XLSX report from persistence data."""
     provider = open_db(db_path)
@@ -606,54 +670,49 @@ def report(
         console.print("[bold red]No data available for report.[/bold red]")
         raise typer.Exit(code=1)
 
+    selected_tickers = [ctx.ticker for ctx in contexts]
     classification_rows = [context_to_row(ctx) for ctx in contexts]
     classification_df = pd.DataFrame(classification_rows)
-    # Build uptrend details
-    uptrend_rows = []
-    for ctx in contexts:
-        # combine persisted history and current uptrend (if any)
-        all_uptrends = list(ctx.uptrend_history)
-        if ctx.current_uptrend:
-            all_uptrends.append(ctx.current_uptrend)
-        for up in all_uptrends:
-            uptrend_rows.append({
-                "Ticker": ctx.ticker,
-                "Classification": ctx.classification.name if ctx.classification else "",
-                "Start Date": up.start_date.isoformat() if up.start_date else "",
-                "End Date": up.end_date.isoformat() if getattr(up, "end_date", None) else "",
-                "Weeks": up.num_weeks,
-                "Pct Closes Above": up.pct_closes_above,
-                "Strength": up.strength.name if up.strength else "",
-                "Highest Price": up.highest_price,
-                "Highest Price Date": up.highest_price_date.isoformat() if up.highest_price_date else "",
-                "Lowest Price": up.lowest_price,
-                "Lowest Price Date": up.lowest_price_date.isoformat() if up.lowest_price_date else "",
-            })
-    # Ensure at least one row for the sheet
-    if not uptrend_rows:
-        uptrend_rows.append({
-            "Ticker": "",
-            "Classification": "",
-            "Start Date": "",
-            "End Date": "",
-            "Weeks": "",
-            "Pct Closes Above": "",
-            "Strength": "",
-            "Highest Price": "",
-            "Highest Price Date": "",
-            "Lowest Price": "",
-            "Lowest Price Date": "",
-        })
-    uptrends_df = pd.DataFrame(uptrend_rows)
+    uptrends_df = pd.DataFrame(build_uptrend_rows(contexts))
     trade_records = provider.get_all_trades()
     if tickers:
         trade_records = [trade for trade in trade_records if trade.ticker in tickers]
     trades_df = pd.DataFrame(build_trade_rows(trade_records))
+    signals_df = build_signal_rows([signal for ticker in selected_tickers for signal in provider.get_signals(ticker)])
 
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        classification_df.to_excel(writer, sheet_name="Classifications", index=False)
-        uptrends_df.to_excel(writer, sheet_name="Uptrends", index=False)
-        trades_df.to_excel(writer, sheet_name="Trades", index=False)
+    debug_df = pd.DataFrame()
+    if include_debug_csv:
+        debug_df = load_debug_csv_frames(DEFAULT_CACHE_DIR, selected_tickers)
+
+    sheets = {
+        "Classifications": classification_df,
+        "Uptrends": uptrends_df,
+        "Trades": trades_df,
+        "Signals": signals_df,
+    }
+    formats = {
+        "Classifications": SheetFormat(date_columns=("Last Update",)),
+        "Uptrends": SheetFormat(date_columns=("Start Date", "End Date", "Highest Price Date", "Lowest Price Date")),
+        "Trades": SheetFormat(date_columns=("Entry Date", "Exit Date")),
+        "Signals": SheetFormat(
+            date_columns=("Date",),
+            highlight_column="Signal Type",
+            highlight_values=SIGNAL_ROW_FILL_MAP,
+        ),
+    }
+
+    if include_debug_csv and not debug_df.empty:
+        sheets["DebugRaw"] = debug_df
+        formats["DebugRaw"] = SheetFormat(
+            date_columns=("Date", "Crossover Date"),
+            highlight_column="Signal Types",
+            highlight_contains=True,
+            highlight_values=SIGNAL_ROW_FILL_MAP,
+        )
+    elif include_debug_csv:
+        console.print("[yellow]No cached debug CSV files were found for the selected tickers.[/yellow]")
+
+    write_excel_workbook(output, sheets, formats)
 
     console.print(Panel(f"Report written to {output}", style="green"))
 
@@ -663,9 +722,10 @@ def backtest(
     tickers: List[str] = typer.Argument(..., help="Stock tickers to backtest."),
     db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
     output: Path = typer.Option(Path("backtest_results.xlsx"), help="Backtest XLSX output path."),
-    start_date: str = typer.Option("2000-01-01", help="Start date for historical backtest."),
+    start_date: Optional[str] = typer.Option(None, help="Start date for historical backtest. Omit for full history."),
     end_date: Optional[str] = typer.Option(None, help="End date for historical backtest."),
     data_file: Optional[Path] = typer.Option(None, help="Optional CSV/XLSX/Parquet file containing OHLCV data."),
+    debug_csv: bool = typer.Option(False, "--debug-csv", help="Persist raw analysis CSV output in the cache directory."),
 ):
     """Run backtesting using the Trend Rider strategy wrapper."""
     engine = make_engine(db_path)
@@ -681,14 +741,14 @@ def backtest(
                 console.print("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
                 tickers = list(daily_data.keys())
     else:
-        end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         daily_data = YFinanceDownloader.download_bulk(tickers, start_date, end_date)
         if not daily_data:
             # raise typer.Exit(code=1, message="No historical data returned from yfinance.")
             console.print("[bold red]No historical data returned from yfinance.[/bold red]")
             raise typer.Exit(code=1)
 
-    wrapper = StrategyBacktestWrapper(engine, tickers, daily_data)
+    debug_callback = build_debug_csv_callback(DEFAULT_CACHE_DIR) if debug_csv else None
+    wrapper = StrategyBacktestWrapper(engine, tickers, daily_data, debug_callback=debug_callback)
     report_path = wrapper.run(output)
     console.print(Panel(f"Backtest complete. Results saved to {report_path}", style="green"))
 
