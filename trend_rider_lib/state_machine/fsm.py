@@ -44,6 +44,7 @@ class StockFSM:
         self.config = config
         self.context = StockContext(ticker=ticker)
         self.signal_callback = signal_callback
+        self._current_row: Optional[pd.Series] = None
 
         # Define state transitions with guards and callbacks
         transitions = [
@@ -188,101 +189,105 @@ class StockFSM:
         Args:
             row: Series with OHLCV data, EMA21, and flags
         """
-        self.context.candle_count += 1
-        self.context.last_close = row['Close']
-        self.context.last_ema21 = row.get('EMA21')
-        self.context.last_update = row.name  # Assumes index is datetime
+        self._current_row = row
+        try:
+            self.context.candle_count += 1
+            self.context.last_close = row['Close']
+            self.context.last_ema21 = row.get('EMA21')
+            self.context.last_update = row.name  # Assumes index is datetime
 
-        # Update zone flags
-        if pd.notna(self.context.last_ema21):
-            close = self.context.last_close
-            ema21 = self.context.last_ema21
-            upper_bound = ema21 * (1 + self.config.buy_zone_upper_pct)
+            # Update zone flags
+            if pd.notna(self.context.last_ema21):
+                close = self.context.last_close
+                ema21 = self.context.last_ema21
+                upper_bound = ema21 * (1 + self.config.buy_zone_upper_pct)
 
-            self.context.is_buyzone = (close > ema21) and (close <= upper_bound)
+                self.context.is_buyzone = (close > ema21) and (close <= upper_bound)
 
-            # Track uptrend statistics only once an uptrend has started.
-            if self.context.current_uptrend and self.state in [
-                State.BUY_ZONE.name,
-                State.UPTREND.name,
-                State.ABOVE_BUY_ZONE.name,
-            ]:
-                self.context.uptrend_weeks += 1
-                if close > ema21:
-                    self.context.closes_above_ema += 1
-                else:
-                    self.context.closes_below_ema += 1
+                # Track uptrend statistics only once an uptrend has started.
+                if self.context.current_uptrend and self.state in [
+                    State.BUY_ZONE.name,
+                    State.UPTREND.name,
+                    State.ABOVE_BUY_ZONE.name,
+                ]:
+                    self.context.uptrend_weeks += 1
+                    if close > ema21:
+                        self.context.closes_above_ema += 1
+                    else:
+                        self.context.closes_below_ema += 1
 
-                # Check for TR qualified milestone
-                if (
-                    self.context.uptrend_weeks == self.config.tr_qualify_weeks
-                    and not self.context.tr_qualified
-                ):
-                    self.context.tr_qualified = True
-                    self.emit_signal(SignalType.TR_QUALIFIED, row)
-
-                # Update current uptrend record
-                if self.context.current_uptrend:
-                    self.context.current_uptrend.num_weeks = self.context.uptrend_weeks
-                    self.context.current_uptrend.closes_above_ema = self.context.closes_above_ema
-                    self.context.current_uptrend.closes_below_ema = self.context.closes_below_ema
-                    if self.context.uptrend_weeks > 0:
-                        self.context.current_uptrend.pct_closes_above = (
-                            self.context.closes_above_ema / self.context.uptrend_weeks
-                        )
-
-                    # Track weekly extreme prices for the active uptrend.
+                    # Check for TR qualified milestone
                     if (
-                        self.context.current_uptrend.highest_price is None
-                        or row['High'] > self.context.current_uptrend.highest_price
+                        self.context.uptrend_weeks == self.config.tr_qualify_weeks
+                        and not self.context.tr_qualified
                     ):
-                        self.context.current_uptrend.highest_price = row['High']
-                        self.context.current_uptrend.highest_price_date = row.name
+                        self.context.tr_qualified = True
+                        self.emit_signal(SignalType.TR_QUALIFIED, row)
 
-                    if (
-                        self.context.current_uptrend.lowest_price is None
-                        or row['Low'] < self.context.current_uptrend.lowest_price
-                    ):
-                        self.context.current_uptrend.lowest_price = row['Low']
-                        self.context.current_uptrend.lowest_price_date = row.name
+                    # Update current uptrend record
+                    if self.context.current_uptrend:
+                        self.context.current_uptrend.num_weeks = self.context.uptrend_weeks
+                        self.context.current_uptrend.closes_above_ema = self.context.closes_above_ema
+                        self.context.current_uptrend.closes_below_ema = self.context.closes_below_ema
+                        if self.context.uptrend_weeks > 0:
+                            self.context.current_uptrend.pct_closes_above = (
+                                self.context.closes_above_ema / self.context.uptrend_weeks
+                            )
 
-        # Handle state transitions based on current state
-        if self.state == State.WARMUP.name:
-            if self.context.candle_count >= self.config.warmup_weeks:
-                self.context.warmup_complete = True
-                self.warmup_done()
+                        # Track weekly extreme prices for the active uptrend.
+                        if (
+                            self.context.current_uptrend.highest_price is None
+                            or row['High'] > self.context.current_uptrend.highest_price
+                        ):
+                            self.context.current_uptrend.highest_price = row['High']
+                            self.context.current_uptrend.highest_price_date = row.name
 
-        elif self.state == State.OBSERVING.name:
-            if self.is_in_buyzone():
-                self.enter_buyzone()
-            elif self.is_above_buyzone():
-                self.go_above_buyzone()
+                        if (
+                            self.context.current_uptrend.lowest_price is None
+                            or row['Low'] < self.context.current_uptrend.lowest_price
+                        ):
+                            self.context.current_uptrend.lowest_price = row['Low']
+                            self.context.current_uptrend.lowest_price_date = row.name
 
-        elif self.state == State.BUY_ZONE.name:
-            if self.is_downtrend_trigger():
-                self.enter_downtrend()
+            # Handle state transitions based on current state
+            if self.state == State.WARMUP.name:
+                if self.context.candle_count >= self.config.warmup_weeks:
+                    self.context.warmup_complete = True
+                    self.warmup_done()
 
-        elif self.state == State.UPTREND.name:
-            if self.is_downtrend_trigger():
-                self.enter_downtrend()
-            elif self.is_above_buyzone():
-                self.leave_buyzone()
-            elif self.is_in_buyzone():
-                self.reenter_buyzone()
+            elif self.state == State.OBSERVING.name:
+                if self.is_in_buyzone():
+                    self.enter_buyzone()
+                elif self.is_above_buyzone():
+                    self.go_above_buyzone()
 
-        elif self.state == State.ABOVE_BUY_ZONE.name:
-            if self.is_downtrend_trigger():
-                self.enter_downtrend()
-            elif self.is_in_buyzone():
-                self.reenter_buyzone()
+            elif self.state == State.BUY_ZONE.name:
+                if self.is_downtrend_trigger():
+                    self.enter_downtrend()
 
-        elif self.state == State.RECOVERING.name:
-            if self.is_in_buyzone():
-                self.momentum_entry()
-            elif self.is_above_buyzone():
-                self.go_above_buyzone()
-            elif self.is_downtrend_trigger():
-                self.reenter_downtrend()
+            elif self.state == State.UPTREND.name:
+                if self.is_downtrend_trigger():
+                    self.enter_downtrend()
+                elif self.is_above_buyzone():
+                    self.leave_buyzone()
+                elif self.is_in_buyzone():
+                    self.reenter_buyzone()
+
+            elif self.state == State.ABOVE_BUY_ZONE.name:
+                if self.is_downtrend_trigger():
+                    self.enter_downtrend()
+                elif self.is_in_buyzone():
+                    self.reenter_buyzone()
+
+            elif self.state == State.RECOVERING.name:
+                if self.is_in_buyzone():
+                    self.momentum_entry()
+                elif self.is_above_buyzone():
+                    self.go_above_buyzone()
+                elif self.is_downtrend_trigger():
+                    self.reenter_downtrend()
+        finally:
+            self._current_row = None
 
     def process_daily_candle(self, row: pd.Series) -> None:
         """
@@ -291,30 +296,34 @@ class StockFSM:
         Args:
             row: Series with daily OHLCV data and EMAs
         """
-        self.context.last_ema34 = row.get('EMA34')
-        self.context.last_ema55 = row.get('EMA55')
+        self._current_row = row
+        try:
+            self.context.last_ema34 = row.get('EMA34')
+            self.context.last_ema55 = row.get('EMA55')
 
-        # Check for uptrend start from buy zone
-        if (
-            self.state == State.BUY_ZONE.name
-            and self.context.current_uptrend is None
-            and pd.notna(self.context.last_ema21)
-            and row['Close'] > self.context.last_ema21
-        ):
-            self.start_uptrend()
-            self.emit_signal(SignalType.BUY_ENTRY, row)
+            # Check for uptrend start from buy zone
+            if (
+                self.state == State.BUY_ZONE.name
+                and self.context.current_uptrend is None
+                and pd.notna(self.context.last_ema21)
+                and row['Close'] > self.context.last_ema21
+            ):
+                self.start_uptrend()
+                self.emit_signal(SignalType.BUY_ENTRY, row)
 
-        # Check for EMA crossover in downtrend (EMA34 > EMA55)
-        elif (
-            self.state == State.DOWNTREND.name
-            and pd.notna(self.context.last_ema34)
-            and pd.notna(self.context.last_ema55)
-            and self.context.last_ema34 > self.context.last_ema55
-            and not self.context.is_crossover_detected
-        ):
-            self.detect_crossover()
-            self.context.crossover_date = row.name
-            self.context.crossover_price = row['Close']
+            # Check for EMA crossover in downtrend (EMA34 > EMA55)
+            elif (
+                self.state == State.DOWNTREND.name
+                and pd.notna(self.context.last_ema34)
+                and pd.notna(self.context.last_ema55)
+                and self.context.last_ema34 > self.context.last_ema55
+                and not self.context.is_crossover_detected
+            ):
+                self.detect_crossover()
+                self.context.crossover_date = row.name
+                self.context.crossover_price = row['Close']
+        finally:
+            self._current_row = None
 
     # Guard conditions
     def is_in_buyzone(self) -> bool:
@@ -417,6 +426,8 @@ class StockFSM:
             row: Optional row data for metadata
         """
         if self.signal_callback:
+            source_row = row if row is not None else self._current_row
+            metadata = self._build_signal_metadata(signal_type, source_row)
             signal = SignalEvent(
                 ticker=self.ticker,
                 signal_type=signal_type,
@@ -424,6 +435,44 @@ class StockFSM:
                 close_price=self.context.last_close,
                 ema21=self.context.last_ema21,
                 ema34=self.context.last_ema34,
-                ema55=self.context.last_ema55
+                ema55=self.context.last_ema55,
+                metadata=metadata
             )
             self.signal_callback(signal)
+
+    def _build_signal_metadata(
+        self,
+        signal_type: SignalType,
+        row: Optional[pd.Series]
+    ) -> dict:
+        """Build structured metadata for a signal event."""
+        reason_map = {
+            SignalType.UPTREND_START: "Daily close crossed above EMA21 from BUY_ZONE",
+            SignalType.BUY_ENTRY: "Daily buy entry confirmed above EMA21",
+            SignalType.REENTRY: "TR-qualified stock re-entered the buy zone",
+            SignalType.MOMENTUM_ENTRY: "Recovery completed and price re-entered the buy zone",
+            SignalType.DOWNTREND_START: "Weekly close fell below the downtrend trigger",
+            SignalType.EMA_CROSSOVER: "EMA34 crossed above EMA55 during downtrend",
+            SignalType.TR_QUALIFIED: "Uptrend weeks reached the qualification threshold",
+        }
+
+        metadata = {
+            "reason": reason_map.get(signal_type, signal_type.name),
+            "timeframe": row.get("timeframe") if row is not None and "timeframe" in row else None,
+            "state": self.state,
+            "candle_count": self.context.candle_count,
+            "uptrend_weeks": self.context.uptrend_weeks,
+            "tr_qualified": self.context.tr_qualified,
+            "is_buyzone": self.context.is_buyzone,
+            "is_crossover_detected": self.context.is_crossover_detected,
+            "open": row.get("Open") if row is not None and "Open" in row else None,
+            "high": row.get("High") if row is not None and "High" in row else None,
+            "low": row.get("Low") if row is not None and "Low" in row else None,
+            "close": row.get("Close") if row is not None and "Close" in row else self.context.last_close,
+            "volume": row.get("Volume") if row is not None and "Volume" in row else None,
+            "ema21": row.get("EMA21") if row is not None and "EMA21" in row else self.context.last_ema21,
+            "ema34": row.get("EMA34") if row is not None and "EMA34" in row else self.context.last_ema34,
+            "ema55": row.get("EMA55") if row is not None and "EMA55" in row else self.context.last_ema55,
+        }
+
+        return {key: value for key, value in metadata.items() if value is not None}

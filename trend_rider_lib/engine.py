@@ -1,7 +1,8 @@
 """
 Main Trend Rider engine orchestrating all modules.
 """
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+import json
 import logging
 import pandas as pd
 from datetime import datetime
@@ -15,7 +16,7 @@ from .indicators.ema_engine import enrich_with_indicators, incremental_ema
 from .indicators.flag_computer import compute_zone_flags, mark_warmup_complete
 
 from .state_machine.fsm import StockFSM
-from .state_machine.classifier import update_classification
+from .state_machine.classifier import classify_stock, update_classification
 from .state_machine.fsm_serializer import serialize_context, deserialize_context
 
 from .signals.signal_engine import SignalEngine
@@ -61,7 +62,8 @@ class TrendRiderEngine:
     def run_full_scan(
         self,
         tickers: List[str],
-        daily_data: Dict[str, pd.DataFrame]
+        daily_data: Dict[str, pd.DataFrame],
+        debug_callback: Optional[Callable[[str, pd.DataFrame], None]] = None
     ) -> Dict[str, StockContext]:
         """
         Run full historical scan on provided tickers.
@@ -87,7 +89,11 @@ class TrendRiderEngine:
                 continue
 
             daily_df = daily_data[ticker].copy()
-            context = self._process_full_history(ticker, daily_df)
+            context = self._process_full_history(
+                ticker,
+                daily_df,
+                debug_callback=debug_callback
+            )
 
             # Save final state
             self.state_store.save_context(context)
@@ -228,7 +234,12 @@ class TrendRiderEngine:
             results[ticker] = self.trade_store.get_open_trades(ticker)
         return results
 
-    def _process_full_history(self, ticker: str, daily_df: pd.DataFrame) -> StockContext:
+    def _process_full_history(
+        self,
+        ticker: str,
+        daily_df: pd.DataFrame,
+        debug_callback: Optional[Callable[[str, pd.DataFrame], None]] = None
+    ) -> StockContext:
         """
         Process complete historical data for a ticker.
 
@@ -269,7 +280,10 @@ class TrendRiderEngine:
         
         
         # Create FSM
+        emitted_signals: List[SignalEvent] = []
+
         def signal_callback(signal: SignalEvent):
+            emitted_signals.append(signal)
             self.signal_engine.process_signal(signal)
             trade = self.trade_manager.process_signal(signal, signal.close_price)
             if trade:
@@ -298,7 +312,11 @@ class TrendRiderEngine:
             .drop(columns=['_order'])
         )
 
+        debug_rows = [] if debug_callback else None
+
         for idx, row in all_candles.iterrows():
+            emitted_signals.clear()
+            state_before = fsm.state
             if row['timeframe'] == 'weekly':
                 fsm.process_weekly_candle(row)
             else:
@@ -312,10 +330,84 @@ class TrendRiderEngine:
                 for trade in closed_trades:
                     self.trade_store.update_trade(trade)
 
+            if debug_rows is not None:
+                debug_rows.append(
+                    self._build_debug_row(
+                        ticker=ticker,
+                        candle_date=idx,
+                        row=row,
+                        state_before=state_before,
+                        state_after=fsm.state,
+                        context=fsm.context,
+                        emitted_signals=emitted_signals,
+                    )
+                )
+
         # Final classification
         update_classification(fsm.context)
 
+        if debug_callback and debug_rows is not None:
+            debug_callback(ticker, pd.DataFrame(debug_rows))
+
         return fsm.context
+
+    @staticmethod
+    def _build_debug_row(
+        ticker: str,
+        candle_date: datetime,
+        row: pd.Series,
+        state_before: str,
+        state_after: str,
+        context: StockContext,
+        emitted_signals: List[SignalEvent]
+    ) -> Dict[str, Any]:
+        """Build a single raw analysis debug row."""
+        signal_types = [signal.signal_type.name for signal in emitted_signals]
+        signal_reasons = [
+            str(signal.metadata.get("reason", signal.signal_type.name))
+            for signal in emitted_signals
+        ]
+        signal_metadata = [
+            signal.metadata for signal in emitted_signals
+        ]
+
+        candle_color = "GREEN" if row.get("Close", 0) >= row.get("Open", 0) else "RED"
+        if row.get("Close") == row.get("Open"):
+            candle_color = "NEUTRAL"
+
+        return {
+            "Ticker": ticker,
+            "Date": candle_date,
+            "Timeframe": row.get("timeframe"),
+            "Candle Color": candle_color,
+            "Open": row.get("Open"),
+            "High": row.get("High"),
+            "Low": row.get("Low"),
+            "Close": row.get("Close"),
+            "Volume": row.get("Volume"),
+            "EMA21": row.get("EMA21"),
+            "EMA34": row.get("EMA34"),
+            "EMA55": row.get("EMA55"),
+            "is_buyzone": row.get("is_buyzone"),
+            "is_above_buyzone": row.get("is_above_buyzone"),
+            "is_downtrend_trigger": row.get("is_downtrend_trigger"),
+            "warmup_complete": row.get("warmup_complete"),
+            "State Before": state_before,
+            "State After": state_after,
+            "Classification": classify_stock(context).name,
+            "TR Qualified": context.tr_qualified,
+            "Buy Zone": context.is_buyzone,
+            "Uptrend Weeks": context.uptrend_weeks,
+            "Closes Above EMA": context.closes_above_ema,
+            "Closes Below EMA": context.closes_below_ema,
+            "Crossover Detected": context.is_crossover_detected,
+            "Crossover Date": context.crossover_date,
+            "Crossover Price": context.crossover_price,
+            "Signal Count": len(emitted_signals),
+            "Signal Types": "; ".join(signal_types),
+            "Signal Reasons": "; ".join(signal_reasons),
+            "Signal Metadata": json.dumps(signal_metadata, default=str) if signal_metadata else "",
+        }
 
     def _restore_fsm(self, ticker: str, context: StockContext) -> StockFSM:
         """

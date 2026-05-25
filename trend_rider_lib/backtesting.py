@@ -1,24 +1,36 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 
 from .engine import TrendRiderEngine
 from .core.models import TradeRecord
+from .reporting.export_utils import SheetFormat, write_excel_workbook
 
 
 class StrategyBacktestWrapper:
     """Wrapper to run strategy backtests and generate Excel results."""
 
-    def __init__(self, engine: TrendRiderEngine, tickers: List[str], daily_data: Dict[str, pd.DataFrame]):
+    def __init__(
+        self,
+        engine: TrendRiderEngine,
+        tickers: List[str],
+        daily_data: Dict[str, pd.DataFrame],
+        debug_callback: Optional[Callable[[str, pd.DataFrame], None]] = None,
+    ):
         self.engine = engine
         self.tickers = tickers
         self.daily_data = daily_data
+        self.debug_callback = debug_callback
 
     def run(self, output_path: Path) -> Path:
-        results = self.engine.run_full_scan(self.tickers, self.daily_data)
+        results = self.engine.run_full_scan(
+            self.tickers,
+            self.daily_data,
+            debug_callback=self.debug_callback,
+        )
         self._write_report(output_path, results)
         return output_path
 
@@ -31,9 +43,15 @@ class StrategyBacktestWrapper:
         trade_rows = [self._trade_row(trade) for trade in trades]
         result_rows = [self._context_row(context) for context in results.values()]
 
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            pd.DataFrame(result_rows).to_excel(writer, sheet_name="ScanResults", index=False)
-            pd.DataFrame(trade_rows).to_excel(writer, sheet_name="Trades", index=False)
+        sheets = {
+            "ScanResults": pd.DataFrame(result_rows),
+            "Trades": pd.DataFrame(trade_rows),
+        }
+        formats = {
+            "ScanResults": SheetFormat(date_columns=("Last Update",)),
+            "Trades": SheetFormat(date_columns=("Entry Date", "Exit Date")),
+        }
+        write_excel_workbook(output_path, sheets, formats)
 
     @staticmethod
     def _trade_row(trade: TradeRecord) -> dict:
@@ -41,9 +59,9 @@ class StrategyBacktestWrapper:
             "ID": trade.id,
             "Ticker": trade.ticker,
             "Status": trade.status.name if trade.status else "UNKNOWN",
-            "Entry Date": trade.entry_date.isoformat() if trade.entry_date else "",
+            "Entry Date": trade.entry_date,
             "Entry Price": trade.entry_price,
-            "Exit Date": trade.exit_date.isoformat() if trade.exit_date else "",
+            "Exit Date": trade.exit_date,
             "Exit Price": trade.exit_price,
             "Profit/Loss %": trade.profit_loss_pct,
             "Initial SL": trade.initial_sl,
@@ -57,6 +75,6 @@ class StrategyBacktestWrapper:
             "Ticker": getattr(context, "ticker", ""),
             "Classification": getattr(context, "classification", "").name if hasattr(getattr(context, "classification", ""), "name") else getattr(context, "classification", ""),
             "State": getattr(context, "current_state", ""),
-            "Last Update": getattr(context, "last_update", ""),
+            "Last Update": getattr(context, "last_update", None),
             "Last Close": getattr(context, "last_close", ""),
         }

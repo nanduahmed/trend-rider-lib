@@ -28,7 +28,7 @@ def classify_stock(context: StockContext) -> Classification:
         return Classification.UNQUALIFIED
 
     # Check for graduation from Momentum to Prime
-    if context.uptrend_weeks >= context.config.tr_qualify_weeks if hasattr(context, 'config') else 40:
+    if context.uptrend_weeks >= 40:
         if context.is_buyzone:
             return Classification.PRIME
         else:

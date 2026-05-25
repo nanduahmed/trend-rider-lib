@@ -26,7 +26,7 @@ class YFinanceDownloader:
     @staticmethod
     def download_full_history(
         ticker: str,
-        start_date: str,
+        start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ) -> pd.DataFrame:
         """
@@ -34,8 +34,11 @@ class YFinanceDownloader:
 
         Args:
             ticker: Stock symbol (e.g., 'AAPL')
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format (default: today)
+            start_date: Start date in YYYY-MM-DD format. If omitted, downloads
+                the maximum available history from the data source.
+            end_date: End date in YYYY-MM-DD format (default: today when a
+                start date is supplied, otherwise used as an upper bound on the
+                maximum history download)
 
         Returns:
             DataFrame with columns Open, High, Low, Close, Volume
@@ -44,21 +47,26 @@ class YFinanceDownloader:
         Raises:
             Exception: If download fails
         """
-        if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-
         try:
             stock = yf.Ticker(ticker)
-            df = stock.history(start=start_date, end=end_date, interval='1d')
+            if start_date:
+                if not end_date:
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                df = stock.history(start=start_date, end=end_date, interval='1d')
+            else:
+                df = stock.history(period='max', interval='1d')
+                if end_date:
+                    df = df.loc[:end_date]
 
             if df.empty:
                 return pd.DataFrame()
 
-            # Clean column names
-            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Dividends', 'Stock Splits']
-
-            # Keep only OHLCV
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+            # Keep only OHLCV columns that are actually present in the result.
+            expected_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            available_columns = [column for column in expected_columns if column in df.columns]
+            if not available_columns:
+                return pd.DataFrame()
+            df = df[available_columns].copy()
 
             return df
 
@@ -116,7 +124,7 @@ class YFinanceDownloader:
     @staticmethod
     def download_bulk(
         tickers: List[str],
-        start_date: str,
+        start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ) -> Dict[str, pd.DataFrame]:
         """
@@ -124,8 +132,10 @@ class YFinanceDownloader:
 
         Args:
             tickers: List of stock symbols
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format (default: today)
+            start_date: Start date in YYYY-MM-DD format. If omitted, downloads
+                the maximum available history from the data source.
+            end_date: End date in YYYY-MM-DD format (default: today when a
+                start date is supplied)
 
         Returns:
             Dictionary mapping ticker → DataFrame

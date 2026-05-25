@@ -68,6 +68,7 @@ stateDiagram-v2
 *   Uptrend clock runs across `UPTREND`, `ABOVE_BUY_ZONE`, and `BUY_ZONE`  
     (after uptrend has started)
 *   Any uptrend begins when close > EMA21
+*   Reports and exports use `YYYY-MM-DD` dates and round displayed numeric values to 2 decimals
 
 ---
 
@@ -177,6 +178,8 @@ Highest ≥ 150 → TARGET EXIT (+50%)
 ### Full Scan
 
 1.  Download daily OHLC (yfinance)
+    - If `start_date` is omitted, request the maximum available history from the data source.
+    - If `end_date` is omitted, download through today from the supplied start date.
 2.  Resample → weekly (W-FRI)
 3.  Compute EMA21 on weekly, EMA34+EMA55 on daily (TA-Lib)
 4.  Compute zone flags on weekly rows
@@ -187,6 +190,7 @@ Highest ≥ 150 → TARGET EXIT (+50%)
 9.  Finalize active current\_uptrend metadata
 10.  update\_classification()
 11.  save\_context() + write uptrend\_records independently
+12.  If debug export is enabled, persist a raw per-candle analysis CSV in the cache directory
 
 ### Incremental Update
 
