@@ -147,6 +147,9 @@ def test_build_signal_rows_includes_reason_and_metadata():
         "EMA21",
         "EMA34",
         "EMA55",
+        "Trend Cycle",
+        "Trend Start",
+        "Trend End",
         "Supporting Values",
         "Metadata",
     ]

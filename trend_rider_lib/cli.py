@@ -123,6 +123,10 @@ def context_to_row(context: StockContext) -> Dict[str, str]:
         "Last Close": context.last_close,
         "Last Update": context.last_update,
         "Uptrend Weeks": context.uptrend_weeks,
+        "Trend Start": context.trend_start_date,
+        "Trend End": context.trend_end_date,
+        "Daily EMA21 Cross": context.daily_ema21_cross_date,
+        "First Buy Zone": context.first_buy_zone_date,
     }
 
 
@@ -145,6 +149,20 @@ def build_uptrend_rows(contexts: List[StockContext]) -> List[Dict[str, object]]:
                 "Highest Price Date": up.highest_price_date,
                 "Lowest Price": up.lowest_price,
                 "Lowest Price Date": up.lowest_price_date,
+                "ROC 1W %": up.roc_1w_pct,
+                "ROC 3W %": up.roc_3w_pct,
+                "ROC 6M %": up.roc_6m_pct,
+                "ROC 9M %": up.roc_9m_pct,
+                "Max Profit %": up.max_profit_pct,
+                "Trend ROC %": up.trend_roc_pct,
+                "EMA21 Slope": up.ema21_slope,
+                "EMA34-55 Spread": up.ema34_55_spread,
+                "EMA34-55 Spread %": up.ema34_55_spread_pct,
+                "Efficiency Ratio": up.efficiency_ratio,
+                "ATH Price": up.ath_price,
+                "ATH Date": up.ath_date,
+                "Distance From ATH": up.distance_from_ath_abs,
+                "Distance From ATH %": up.distance_from_ath_pct,
             })
 
     if not rows:
@@ -160,6 +178,20 @@ def build_uptrend_rows(contexts: List[StockContext]) -> List[Dict[str, object]]:
             "Highest Price Date": None,
             "Lowest Price": None,
             "Lowest Price Date": None,
+            "ROC 1W %": None,
+            "ROC 3W %": None,
+            "ROC 6M %": None,
+            "ROC 9M %": None,
+            "Max Profit %": None,
+            "Trend ROC %": None,
+            "EMA21 Slope": None,
+            "EMA34-55 Spread": None,
+            "EMA34-55 Spread %": None,
+            "Efficiency Ratio": None,
+            "ATH Price": None,
+            "ATH Date": None,
+            "Distance From ATH": None,
+            "Distance From ATH %": None,
         })
 
     return rows
@@ -695,7 +727,7 @@ def report(
         "Uptrends": SheetFormat(date_columns=("Start Date", "End Date", "Highest Price Date", "Lowest Price Date")),
         "Trades": SheetFormat(date_columns=("Entry Date", "Exit Date")),
         "Signals": SheetFormat(
-            date_columns=("Date",),
+            date_columns=("Date", "Trend Start", "Trend End"),
             highlight_column="Signal Type",
             highlight_values=SIGNAL_ROW_FILL_MAP,
         ),
@@ -704,7 +736,7 @@ def report(
     if include_debug_csv and not debug_df.empty:
         sheets["DebugRaw"] = debug_df
         formats["DebugRaw"] = SheetFormat(
-            date_columns=("Date", "Crossover Date"),
+            date_columns=("Date", "Crossover Date", "Trend Start", "Trend End", "Daily EMA21 Cross", "Daily Downtrend Trigger", "First Buy Zone", "Positive Crossover"),
             highlight_column="Signal Types",
             highlight_contains=True,
             highlight_values=SIGNAL_ROW_FILL_MAP,

@@ -1,0 +1,342 @@
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from trend_rider_lib import (
+    SignalEvent,
+    SignalType,
+    State,
+    StockContext,
+    TrendEventRecord,
+    TrendEventType,
+    TrendRiderConfig,
+    UptrendRecord,
+)
+from trend_rider_lib.persistence import SQLiteProvider
+from trend_rider_lib.state_machine.fsm import StockFSM
+from trend_rider_lib.state_machine.trend_metrics import record_daily_point, record_weekly_point, update_trend_metrics
+
+
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "delhivery_weekly_confirmation.csv"
+
+
+def load_fixture_frame() -> pd.DataFrame:
+    frame = pd.read_csv(FIXTURE_PATH)
+    frame["Date"] = pd.to_datetime(frame["Date"])
+    frame["timeframe"] = frame["Timeframe"].str.lower()
+    order = {"daily": 0, "weekly": 1}
+    frame["_order"] = frame["timeframe"].map(order)
+    frame = frame.sort_values(["Date", "_order"], kind="stable").drop(columns=["_order"])
+    frame = frame.set_index("Date")
+    return frame
+
+
+def weekly_row(date: str, open_: float, high: float, low: float, close: float, ema21: float) -> pd.Series:
+    return pd.Series(
+        {
+            "Open": open_,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": 1_000_000,
+            "EMA21": ema21,
+            "timeframe": "weekly",
+        },
+        name=pd.Timestamp(date),
+    )
+
+
+def daily_row(
+    date: str,
+    open_: float,
+    high: float,
+    low: float,
+    close: float,
+    ema34: float,
+    ema55: float,
+) -> pd.Series:
+    return pd.Series(
+        {
+            "Open": open_,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": 500_000,
+            "EMA34": ema34,
+            "EMA55": ema55,
+            "timeframe": "daily",
+        },
+        name=pd.Timestamp(date),
+    )
+
+
+def feed_rows(fsm: StockFSM, frame: pd.DataFrame) -> tuple[list[SignalEvent], list[TrendEventRecord]]:
+    signals: list[SignalEvent] = []
+    events: list[TrendEventRecord] = []
+
+    def signal_capture(signal: SignalEvent) -> None:
+        signals.append(signal)
+
+    def event_capture(event: TrendEventRecord) -> None:
+        events.append(event)
+
+    fsm.signal_callback = signal_capture
+    fsm.event_callback = event_capture
+
+    for idx, row in frame.iterrows():
+        if row["timeframe"] == "weekly":
+            fsm.process_weekly_candle(row)
+        else:
+            fsm.process_daily_candle(row)
+
+    return signals, events
+
+
+def test_trend_start_is_weekly_confirmed_and_week_is_excluded():
+    frame = load_fixture_frame()
+    frame = pd.concat(
+        [
+            frame,
+            pd.DataFrame(
+                [
+                    weekly_row("2023-04-28", 360.0, 380.0, 356.0, 378.0, 351.0),
+                ]
+            ),
+        ]
+    ).sort_index(kind="stable")
+
+    fsm = StockFSM("DELHIVERY.NS", TrendRiderConfig())
+    signals, events = feed_rows(fsm, frame)
+
+    assert fsm.context.trend_start_date == pd.Timestamp("2023-04-21")
+    assert fsm.context.daily_ema21_cross_date == pd.Timestamp("2023-04-21")
+    assert fsm.context.current_uptrend is not None
+    assert fsm.context.current_uptrend.start_date == pd.Timestamp("2023-04-21")
+    assert fsm.context.current_uptrend.num_weeks == 1
+    assert fsm.context.uptrend_weeks == 1
+    assert any(signal.signal_type == SignalType.UPTREND_START for signal in signals)
+    assert [event.event_type for event in events[:2]] == [
+        TrendEventType.DAILY_EMA21_CONFIRMATION,
+        TrendEventType.WEEKLY_TREND_START,
+    ]
+
+
+def test_trend_end_uses_weekly_close_and_excludes_ending_week():
+    frame = load_fixture_frame()
+    frame = pd.concat(
+        [
+            frame,
+            pd.DataFrame(
+                [
+                    weekly_row("2023-04-28", 360.0, 380.0, 356.0, 378.0, 351.0),
+                    daily_row("2023-05-05", 305.0, 306.0, 298.0, 300.0, 320.0, 321.0),
+                    weekly_row("2023-05-05", 320.0, 325.0, 295.0, 300.0, 340.0),
+                ]
+            ),
+        ]
+    ).sort_index(kind="stable")
+
+    fsm = StockFSM("DELHIVERY.NS", TrendRiderConfig())
+    signals, events = feed_rows(fsm, frame)
+
+    assert fsm.context.trend_end_date == pd.Timestamp("2023-05-05")
+    assert fsm.context.daily_downtrend_trigger_date == pd.Timestamp("2023-05-05")
+    assert fsm.context.current_uptrend is None
+    assert fsm.context.uptrend_history[-1].end_date == pd.Timestamp("2023-05-05")
+    assert fsm.context.uptrend_history[-1].num_weeks == 1
+    assert any(signal.signal_type == SignalType.DOWNTREND_START for signal in signals)
+    assert any(event.event_type == TrendEventType.DAILY_DOWNTREND_TRIGGER for event in events)
+    assert any(event.event_type == TrendEventType.WEEKLY_TREND_END for event in events)
+
+
+def test_recovering_blocks_buy_signals():
+    frame = load_fixture_frame()
+    frame = pd.concat(
+        [
+            frame,
+            pd.DataFrame(
+                [
+                    weekly_row("2023-04-28", 360.0, 380.0, 356.0, 378.0, 351.0),
+                    daily_row("2023-05-05", 305.0, 306.0, 298.0, 300.0, 320.0, 321.0),
+                    weekly_row("2023-05-05", 320.0, 325.0, 295.0, 300.0, 340.0),
+                    weekly_row("2023-05-12", 308.0, 322.0, 307.0, 320.0, 310.0),
+                    daily_row("2023-05-15", 318.0, 326.0, 316.0, 324.0, 300.0, 305.0),
+                ]
+            ),
+        ]
+    ).sort_index(kind="stable")
+
+    fsm = StockFSM("DELHIVERY.NS", TrendRiderConfig())
+    signals, _events = feed_rows(fsm, frame)
+
+    assert fsm.state == State.RECOVERING.name
+    assert not any(signal.signal_type in {SignalType.BUY_ENTRY, SignalType.MOMENTUM_ENTRY} for signal in signals)
+
+
+def test_buy_signal_gated_by_qualification_and_duplicate_crosses():
+    config = TrendRiderConfig()
+    fsm = StockFSM("TEST", config)
+    signals: list[SignalEvent] = []
+
+    def signal_capture(signal: SignalEvent) -> None:
+        signals.append(signal)
+
+    fsm.signal_callback = signal_capture
+    fsm.context.current_state = State.RECOVERING
+    fsm.machine.set_state(State.RECOVERING.name, model=fsm)
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.current_uptrend.cycle_id = 1
+    fsm.context.current_uptrend.start_state = State.RECOVERING.name
+    fsm.context.current_uptrend.first_buy_zone_date = pd.Timestamp("2024-01-01")
+    fsm.context.current_uptrend.first_buy_zone_price = 100.0
+    fsm.context.last_ema21 = 100.0
+    fsm.context.last_close = 101.0
+    fsm.context.is_buyzone = True
+
+    first_cross = daily_row("2024-01-02", 100.0, 102.0, 99.0, 101.0, 99.0, 100.0)
+    fsm.process_daily_candle(first_cross)
+    assert not any(signal.signal_type in {SignalType.BUY_ENTRY, SignalType.MOMENTUM_ENTRY} for signal in signals)
+
+    fsm.context.tr_qualified = True
+    bearish_reset = daily_row("2024-01-03", 100.0, 100.5, 98.0, 99.0, 98.0, 100.0)
+    fsm.process_daily_candle(bearish_reset)
+
+    qualified_cross = daily_row("2024-01-04", 100.0, 103.0, 99.5, 102.0, 101.0, 100.0)
+    fsm.process_daily_candle(qualified_cross)
+
+    assert any(signal.signal_type == SignalType.MOMENTUM_ENTRY for signal in signals)
+    buy_signals = [signal for signal in signals if signal.signal_type in {SignalType.BUY_ENTRY, SignalType.MOMENTUM_ENTRY}]
+    assert len(buy_signals) == 1
+
+
+def test_analytics_and_ath_metrics_from_first_official_buy_zone():
+    uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"), cycle_id=1)
+    uptrend.first_buy_zone_date = pd.Timestamp("2024-01-01")
+    uptrend.first_buy_zone_price = 100.0
+    uptrend.start_price = 100.0
+
+    for offset, close in enumerate([100.0, 103.0, 108.0, 112.0, 120.0]):
+        date = pd.Timestamp("2024-01-01") + pd.Timedelta(weeks=offset)
+        record_weekly_point(uptrend, date, close)
+
+    for offset, close in enumerate([100.0, 101.0, 105.0, 110.0, 115.0, 120.0]):
+        date = pd.Timestamp("2024-01-01") + pd.Timedelta(days=offset)
+        record_daily_point(uptrend, date, close, 90.0 + offset, 80.0 + offset, 70.0 + offset)
+
+    uptrend.highest_price = 130.0
+    uptrend.highest_price_date = pd.Timestamp("2024-01-10")
+    update_trend_metrics(uptrend, 120.0)
+
+    assert uptrend.max_profit_pct == 30.0
+    assert uptrend.trend_roc_pct == 20.0
+    assert uptrend.ath_price == 130.0
+    assert uptrend.ath_date == pd.Timestamp("2024-01-10")
+    assert uptrend.distance_from_ath_abs == 10.0
+    assert uptrend.distance_from_ath_pct == pytest.approx(7.6923, rel=1e-3)
+    assert uptrend.roc_1w_pct == pytest.approx(7.1429, rel=1e-3)
+    assert uptrend.roc_3w_pct == pytest.approx(16.5049, rel=1e-3)
+    assert uptrend.roc_6m_pct is None
+    assert uptrend.roc_9m_pct is None
+    assert uptrend.ema21_slope is not None
+    assert uptrend.ema34_55_spread == pytest.approx(10.0)
+    assert uptrend.efficiency_ratio == pytest.approx(1.0)
+
+
+def test_normalized_persistence_round_trip(tmp_path):
+    db_path = tmp_path / "trend_rider.sqlite"
+    provider = SQLiteProvider(str(db_path))
+
+    context = StockContext(
+        ticker="TEST",
+        current_state=State.UPTREND,
+        tr_qualified=True,
+        trend_start_date=datetime(2024, 1, 1),
+        trend_end_date=None,
+        daily_ema21_cross_date=datetime(2024, 1, 1),
+        daily_ema21_cross_price=100.0,
+        first_buy_zone_date=datetime(2024, 1, 1),
+        first_buy_zone_price=100.0,
+        trend_cycle_id=1,
+        buy_signal_emitted=True,
+        last_buy_signal_date=datetime(2024, 1, 2),
+        last_buy_signal_type=SignalType.BUY_ENTRY,
+        last_buy_signal_crossover_date=datetime(2024, 1, 2),
+        last_close=120.0,
+        last_update=datetime(2024, 1, 2),
+    )
+    context.current_uptrend = UptrendRecord(start_date=datetime(2024, 1, 1), cycle_id=1)
+    context.current_uptrend.start_state = State.UPTREND.name
+    context.current_uptrend.start_price = 100.0
+    context.current_uptrend.first_buy_zone_date = datetime(2024, 1, 1)
+    context.current_uptrend.first_buy_zone_price = 100.0
+    context.current_uptrend.num_weeks = 1
+    context.current_uptrend.closes_above_ema = 1
+    context.current_uptrend.pct_closes_above = 1.0
+    context.current_uptrend.highest_price = 130.0
+    context.current_uptrend.highest_price_date = datetime(2024, 1, 2)
+    context.current_uptrend.max_profit_pct = 30.0
+    context.current_uptrend.trend_roc_pct = 20.0
+    context.current_uptrend.ath_price = 130.0
+    context.current_uptrend.ath_date = datetime(2024, 1, 2)
+    context.current_uptrend.distance_from_ath_abs = 10.0
+    context.current_uptrend.distance_from_ath_pct = 7.6923
+    context.current_uptrend.weekly_close_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 8), 110.0)]
+    context.current_uptrend.daily_close_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 2), 120.0)]
+    context.current_uptrend.daily_ema21_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 2), 101.0)]
+    context.current_uptrend.daily_ema34_history = [(datetime(2024, 1, 1), 99.0), (datetime(2024, 1, 2), 102.0)]
+    context.current_uptrend.daily_ema55_history = [(datetime(2024, 1, 1), 98.0), (datetime(2024, 1, 2), 100.0)]
+    context.uptrend_history = []
+
+    provider.save_context(context)
+    provider.save_signal(
+        SignalEvent(
+            ticker="TEST",
+            signal_type=SignalType.BUY_ENTRY,
+            date=datetime(2024, 1, 2),
+            close_price=120.0,
+            ema21=100.0,
+            ema34=102.0,
+            ema55=100.0,
+            timeframe="daily",
+            state="UPTREND",
+            trend_cycle_id=1,
+            trend_start_date=datetime(2024, 1, 1),
+            metadata={"reason": "First qualifying bullish crossover after trend qualification"},
+        )
+    )
+    provider.save_trend_event(
+        TrendEventRecord(
+            ticker="TEST",
+            event_type=TrendEventType.WEEKLY_TREND_START,
+            date=datetime(2024, 1, 1),
+            close_price=100.0,
+            ema21=100.0,
+            timeframe="weekly",
+            state="UPTREND",
+            trend_cycle_id=1,
+            metadata={"reason": "Weekly close confirmed the official trend start"},
+        )
+    )
+
+    loaded = provider.load_context("TEST")
+    assert loaded is not None
+    assert loaded.trend_start_date == datetime(2024, 1, 1)
+    assert loaded.current_uptrend is not None
+    assert loaded.current_uptrend.max_profit_pct == 30.0
+
+    cycles = provider.get_trend_cycles("TEST")
+    analytics = provider.get_trend_analytics("TEST")
+    events = provider.get_trend_events("TEST")
+    latest_signal = provider.get_latest_signal("TEST")
+
+    assert cycles
+    assert analytics
+    assert events
+    assert latest_signal is not None
+    assert latest_signal.timeframe == "daily"
+    assert latest_signal.state == "UPTREND"
+    assert latest_signal.trend_cycle_id == 1

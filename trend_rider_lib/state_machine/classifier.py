@@ -10,11 +10,12 @@ def classify_stock(context: StockContext) -> Classification:
     Classify stock based on current context.
 
     Classification rules:
-    1. If not tr_qualified → UNQUALIFIED
-    2. If tr_qualified and uptrend_weeks >= 40:
+    1. If RECOVERING → UNQUALIFIED
+    2. If not tr_qualified → UNQUALIFIED
+    3. If tr_qualified and uptrend_weeks >= 40:
        - If crossover NOT detected (original/continuous uptrend) → PRIME or PRIME_WAITLIST
        - If crossover detected (recovered from downtrend) → already graduated to PRIME/PRIME_WAITLIST
-    3. If tr_qualified and uptrend_weeks < 40:
+    4. If tr_qualified and uptrend_weeks < 40:
        - If is_buyzone → MOMENTUM (for post-recovery < 40 weeks)
        - If NOT is_buyzone → MOMENTUM_WAITLIST
 
@@ -24,6 +25,9 @@ def classify_stock(context: StockContext) -> Classification:
     Returns:
         Classification enum value
     """
+    if context.current_state == State.RECOVERING:
+        return Classification.UNQUALIFIED
+
     if not context.tr_qualified:
         return Classification.UNQUALIFIED
 

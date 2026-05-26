@@ -35,6 +35,16 @@ class SignalType(Enum):
     TR_QUALIFIED = auto()
 
 
+class TrendEventType(Enum):
+    """Types of lifecycle events tracked outside the signal stream."""
+    DAILY_EMA21_CONFIRMATION = auto()
+    DAILY_POSITIVE_CROSSOVER = auto()
+    DAILY_DOWNTREND_TRIGGER = auto()
+    WEEKLY_TREND_START = auto()
+    WEEKLY_TREND_END = auto()
+    TR_QUALIFIED = auto()
+
+
 class UptrendStrength(Enum):
     """Classification of uptrend strength based on close ratio."""
     WEAK = auto()  # <70% closes above EMA21

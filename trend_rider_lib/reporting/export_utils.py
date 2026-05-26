@@ -28,12 +28,12 @@ BLUE_FILL = PatternFill("solid", fgColor="DCEBFF")
 NEUTRAL_FILL = PatternFill("solid", fgColor="F9FAFB")
 
 SIGNAL_REASON_MAP: Dict[str, str] = {
-    "UPTREND_START": "Daily close crossed above EMA21 from BUY_ZONE",
-    "BUY_ENTRY": "Daily buy entry confirmed above EMA21",
+    "UPTREND_START": "Weekly close confirmed the official trend start",
+    "BUY_ENTRY": "First qualifying bullish crossover after trend qualification",
     "REENTRY": "TR-qualified stock re-entered the buy zone",
-    "MOMENTUM_ENTRY": "Recovery completed and price re-entered the buy zone",
-    "DOWNTREND_START": "Weekly close fell below the downtrend trigger",
-    "EMA_CROSSOVER": "EMA34 crossed above EMA55 during downtrend",
+    "MOMENTUM_ENTRY": "Qualified bullish crossover during recovery",
+    "DOWNTREND_START": "Weekly close fell below the 0.90 * EMA21 trigger",
+    "EMA_CROSSOVER": "EMA34 crossed above EMA55",
     "TR_QUALIFIED": "Uptrend weeks reached the qualification threshold",
 }
 
@@ -123,7 +123,15 @@ def _build_supporting_values(signal: SignalEvent) -> str:
     }
 
     values = []
-    for key in ("candle_count", "uptrend_weeks", "tr_qualified", "is_buyzone", "is_crossover_detected"):
+    for key in (
+        "candle_count",
+        "weekly_candle_count",
+        "uptrend_weeks",
+        "tr_qualified",
+        "is_buyzone",
+        "is_crossover_detected",
+        "trend_cycle_id",
+    ):
         if key in metadata:
             values.append(f"{key}={metadata[key]}")
 
@@ -146,12 +154,15 @@ def build_signal_rows(signals: Sequence[SignalEvent]) -> pd.DataFrame:
                 "Signal Type": signal.signal_type.name if isinstance(signal.signal_type, SignalType) else str(signal.signal_type),
                 "Signal Reason": metadata.get("reason", signal_reason(signal.signal_type)),
                 "Candle Color": _derive_candle_color(signal),
-                "Timeframe": metadata.get("timeframe", ""),
-                "State": metadata.get("state", ""),
+                "Timeframe": signal.timeframe or metadata.get("timeframe", ""),
+                "State": signal.state or metadata.get("state", ""),
                 "Close": signal.close_price,
                 "EMA21": signal.ema21,
                 "EMA34": signal.ema34,
                 "EMA55": signal.ema55,
+                "Trend Cycle": signal.trend_cycle_id,
+                "Trend Start": signal.trend_start_date,
+                "Trend End": signal.trend_end_date,
                 "Supporting Values": _build_supporting_values(signal),
                 "Metadata": json.dumps(metadata, default=str) if metadata else "",
             }
@@ -171,6 +182,9 @@ def build_signal_rows(signals: Sequence[SignalEvent]) -> pd.DataFrame:
                 "EMA21",
                 "EMA34",
                 "EMA55",
+                "Trend Cycle",
+                "Trend Start",
+                "Trend End",
                 "Supporting Values",
                 "Metadata",
             ]
@@ -193,7 +207,19 @@ def coerce_datetime_columns(df: pd.DataFrame, columns: Sequence[str]) -> pd.Data
     return result
 
 
-def prepare_debug_csv_frame(df: pd.DataFrame, date_columns: Sequence[str] = ("Date", "Crossover Date")) -> pd.DataFrame:
+def prepare_debug_csv_frame(
+    df: pd.DataFrame,
+    date_columns: Sequence[str] = (
+        "Date",
+        "Crossover Date",
+        "Trend Start",
+        "Trend End",
+        "Daily EMA21 Cross",
+        "Daily Downtrend Trigger",
+        "First Buy Zone",
+        "Positive Crossover",
+    ),
+) -> pd.DataFrame:
     """Prepare a debug frame for CSV output with ISO dates and 2-decimal numbers."""
     prepared = df.copy()
 

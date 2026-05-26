@@ -9,6 +9,7 @@ from .core import (
     State,
     Classification,
     SignalType,
+    TrendEventType,
     UptrendStrength,
     TradeStatus,
     ExitReason,
@@ -16,6 +17,7 @@ from .core import (
     UptrendRecord,
     StockContext,
     SignalEvent,
+    TrendEventRecord,
     TradeRecord,
 )
 
@@ -37,6 +39,7 @@ __all__ = [
     "State",
     "Classification",
     "SignalType",
+    "TrendEventType",
     "UptrendStrength",
     "TradeStatus",
     "ExitReason",
@@ -44,6 +47,7 @@ __all__ = [
     "UptrendRecord",
     "StockContext",
     "SignalEvent",
+    "TrendEventRecord",
     "TradeRecord",
     # Engine
     "TrendRiderEngine",

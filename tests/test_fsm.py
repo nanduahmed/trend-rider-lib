@@ -107,8 +107,8 @@ class TestFSMBuyZoneTransition:
 class TestFSMUptrendQualification:
     """Test uptrend start and TR qualification at 40 weeks."""
 
-    def test_uptrend_start_on_daily_close_above_ema21(self, fsm, config):
-        """Daily candle closing above EMA21 should trigger uptrend start."""
+    def test_uptrend_start_on_weekly_confirmation(self, fsm, config):
+        """Weekly confirmation should start the trend; daily close is only evidence."""
         base_date = datetime(2023, 1, 1)
 
         # Complete warmup
@@ -124,12 +124,14 @@ class TestFSMUptrendQualification:
         )
         fsm.process_weekly_candle(row)
 
-        # Process daily candle above EMA21 to trigger uptrend start
+        # Process daily candle above EMA21 as confirmation evidence only
         daily_date = base_date + timedelta(weeks=config.warmup_weeks, days=1)
         daily_row = create_daily_row(daily_date, 103.0, 102.0, 101.0)
         fsm.process_daily_candle(daily_row)
 
-        assert fsm.state == State.UPTREND.name
+        assert fsm.state == State.BUY_ZONE.name
+        assert fsm.context.trend_start_date == base_date + timedelta(weeks=config.warmup_weeks)
+        assert fsm.context.daily_ema21_cross_date is None
         assert fsm.context.uptrend_weeks == 0  # Will increment on next weekly
 
     def test_tr_qualified_at_40_weeks(self, fsm, config):

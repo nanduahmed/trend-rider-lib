@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import datetime
 
 from .core.config import TrendRiderConfig
-from .core.models import StockContext, SignalEvent, TradeRecord
+from .core.models import StockContext, SignalEvent, TradeRecord, TrendEventRecord
 from .core.enums import Classification
 
 from .indicators.resampler import resample_daily_to_weekly
@@ -289,7 +289,11 @@ class TrendRiderEngine:
             if trade:
                 self.trade_store.save_trade(trade)
 
-        fsm = StockFSM(ticker, self.config, signal_callback)
+        def event_callback(event: TrendEventRecord):
+            if hasattr(self.state_store, "save_trend_event"):
+                self.state_store.save_trend_event(event)
+
+        fsm = StockFSM(ticker, self.config, signal_callback, event_callback)
         self.fsm_instances[ticker] = fsm
 
         # Process chronologically - merge and sort all candles
@@ -388,6 +392,12 @@ class TrendRiderEngine:
             "EMA21": row.get("EMA21"),
             "EMA34": row.get("EMA34"),
             "EMA55": row.get("EMA55"),
+            "Trend Start": context.trend_start_date,
+            "Trend End": context.trend_end_date,
+            "Daily EMA21 Cross": context.daily_ema21_cross_date,
+            "Daily Downtrend Trigger": context.daily_downtrend_trigger_date,
+            "First Buy Zone": context.first_buy_zone_date,
+            "Positive Crossover": context.positive_crossover_date,
             "is_buyzone": row.get("is_buyzone"),
             "is_above_buyzone": row.get("is_above_buyzone"),
             "is_downtrend_trigger": row.get("is_downtrend_trigger"),
@@ -398,6 +408,7 @@ class TrendRiderEngine:
             "TR Qualified": context.tr_qualified,
             "Buy Zone": context.is_buyzone,
             "Uptrend Weeks": context.uptrend_weeks,
+            "Weekly Candle Count": context.weekly_candle_count,
             "Closes Above EMA": context.closes_above_ema,
             "Closes Below EMA": context.closes_below_ema,
             "Crossover Detected": context.is_crossover_detected,
@@ -426,7 +437,11 @@ class TrendRiderEngine:
             if trade:
                 self.trade_store.save_trade(trade)
 
-        fsm = StockFSM(ticker, self.config, signal_callback)
+        def event_callback(event: TrendEventRecord):
+            if hasattr(self.state_store, "save_trend_event"):
+                self.state_store.save_trend_event(event)
+
+        fsm = StockFSM(ticker, self.config, signal_callback, event_callback)
         fsm.context = context
 
         # Use transitions library's set_state() to restore the persisted state
