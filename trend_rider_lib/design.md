@@ -37,15 +37,39 @@ Downtrend Trigger:
 
 ## 2. State Machine
 
-```text
-WARMUP -> OBSERVING
-OBSERVING -> BUY_ZONE / ABOVE_BUY_ZONE
-BUY_ZONE -> UPTREND / ABOVE_BUY_ZONE / DOWNTREND
-ABOVE_BUY_ZONE -> BUY_ZONE / DOWNTREND
-UPTREND -> BUY_ZONE / ABOVE_BUY_ZONE / DOWNTREND
-DOWNTREND -> RECOVERING (weekly close above EMA21)
-RECOVERING -> UPTREND (qualified bullish crossover)
-RECOVERING -> DOWNTREND (weekly close below 0.90 * EMA21)
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> WARMUP
+    WARMUP --> OBSERVING : week_count >= 25
+    
+    note right of WARMUP
+        EMA21 = Weekly
+        EMA34 & EMA55 = Daily
+    end note
+
+    %% Entry Gateway
+    OBSERVING --> UPTREND : weekly close > EMA21
+
+    %% Macro Uptrend State
+   %% Macro Uptrend State (Consolidated to 2 Sub-States)
+    state UPTREND {
+        direction LR
+        [*] --> BUY_ZONE : EMA21 < price < EMA21 * 1.05
+        [*] --> NOT_IN_BUY_ZONE : price <= EMA21 OR price >= EMA21 * 1.05
+        
+        BUY_ZONE --> NOT_IN_BUY_ZONE : weekly close < EMA21 OR weekly close > EMA21 * 1.05
+        NOT_IN_BUY_ZONE --> BUY_ZONE : price enters range (EMA21 < price < EMA21 * 1.05)
+    }
+
+    %% Global Macro Exit
+    UPTREND --> DOWNTREND : weekly close < 0.90 * EMA21
+
+    %% Recovery Logic
+    DOWNTREND --> RECOVERING : weekly close > EMA21
+    RECOVERING --> UPTREND : qualified bullish crossover (daily EMA34 > EMA55 )
+    RECOVERING --> DOWNTREND : weekly close < 0.90 * EMA21
 ```
 
 **Key transition rules**

@@ -92,8 +92,8 @@ class YFinanceDownloader:
             DataFrame with new candles, or empty DataFrame if no new data
         """
         start_date = last_date + timedelta(days=1)
-        end_date = datetime.now()
-
+        end_date = datetime.now(last_date.tzinfo) if last_date.tzinfo else datetime.now()
+        
         if start_date >= end_date:
             return pd.DataFrame()
 

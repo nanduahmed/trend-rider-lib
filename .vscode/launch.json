@@ -6,17 +6,28 @@
     "configurations": [
 
         {
-            "name": "Python Debugger: Module",
+            "name": "TR Scan symbol",
             "type": "debugpy",
             "request": "launch",
             "module": "trend_rider_lib",
             "args": [
                 "scan",
-                "TECHNOE.NS",
+                "WINDLAS.NS",
                 "--start-date",
-                "2017-10-30",
+                "2021-08-01",
                 "--end-date",
-                "2025-01-01",
+                "2025-02-03",
+                "--debug-csv"
+            ],
+        },
+        {
+            "name": "TR Update symbol",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "trend_rider_lib",
+            "args": [
+                "update",
+                "WINDLAS.NS"
             ],
         }
     ]

@@ -14,6 +14,12 @@ setup(
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=requirements,
+    entry_points={
+        "console_scripts": [
+            "trendrider=trend_rider_lib.cli:app",
+            "trendrider-app=app.cli:app",
+        ],
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Financial and Insurance Industry",

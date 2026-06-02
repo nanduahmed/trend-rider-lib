@@ -193,18 +193,21 @@ def build_signal_rows(signals: Sequence[SignalEvent]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def coerce_datetime_columns(df: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
-    """Convert datetime columns to timezone-naive datetimes for Excel compatibility."""
-    result = df.copy()
-    for col in columns:
-        if col in result.columns:
-            # Convert to datetime, localize to None (strip TZ), and convert to date objects
-            # Excel/openpyxl works best with date objects or naive datetimes.
-            dt_series = pd.to_datetime(result[col], errors="coerce")
-            if dt_series.dt.tz is not None:
-                dt_series = dt_series.dt.tz_localize(None)
-            result[col] = dt_series
-    return result
+def format_date_column(series: pd.Series) -> pd.Series:
+    """
+    Convert a series of datetime values to fixed 'YYYY-MM-DD' string format.
+    Handles timezone-aware, timezone-naive, and mixed datetime objects safely
+    without raising Excel timezone errors.
+    """
+    # Convert to datetime and coerce errors to NaT
+    dt_series = pd.to_datetime(series, errors="coerce")
+    # Strip timezone if present
+    if dt_series.dt.tz is not None:
+        dt_series = dt_series.dt.tz_localize(None)
+    # Format as YYYY-MM-DD string — avoids any Excel timezone issues
+    formatted = dt_series.dt.strftime("%Y-%m-%d")
+    # Replace NaT / NaNs with None so Excel sees empty cells
+    return formatted.where(formatted.notna(), None)
 
 
 def prepare_debug_csv_frame(
@@ -280,6 +283,33 @@ def _auto_width(value_series: pd.Series, header: str) -> float:
     return min(max_len + 2, 48)
 
 
+def _coerce_timezone_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove timezone info from ALL datetime-like columns in the DataFrame.
+
+    Scans every column and converts any tz-aware datetime/timestamp to a
+    naive 'YYYY-MM-DD' string so Excel never sees a tz-aware value.
+    """
+    result = df.copy()
+    for col in result.columns:
+        # Check if the column dtype is datetime-like or contains datetime objects
+        if pd.api.types.is_datetime64_any_dtype(result[col]):
+            # Convert to naive datetime string — bypasses Excel tz validation
+            dt_series = pd.to_datetime(result[col], errors="coerce")
+            if dt_series.dt.tz is not None:
+                dt_series = dt_series.dt.tz_localize(None)
+            result[col] = dt_series.dt.strftime("%Y-%m-%d")
+        elif result[col].dtype == object:
+            # Object columns may contain individual datetime objects
+            # Check first non-null value to decide
+            sample = result[col].dropna()
+            if not sample.empty and hasattr(sample.iloc[0], "tzinfo"):
+                tz_aware = sample.apply(lambda v: getattr(v, "tzinfo", None) is not None if hasattr(v, "tzinfo") else False)
+                if tz_aware.any():
+                    result[col] = format_date_column(result[col])
+    return result
+
+
 def write_excel_workbook(
     output_path: Path,
     sheets: Mapping[str, pd.DataFrame],
@@ -288,15 +318,11 @@ def write_excel_workbook(
     """Write a workbook and apply consistent report formatting."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Pre-process frames to strip timezones from date columns
+    # Pre-process frames: strip timezone from ALL datetime-like columns
     processed_sheets = {}
     formats = formats or {}
     for name, frame in sheets.items():
-        config = formats.get(name, SheetFormat())
-        if config.date_columns:
-            processed_sheets[name] = coerce_datetime_columns(frame, config.date_columns)
-        else:
-            processed_sheets[name] = frame
+        processed_sheets[name] = _coerce_timezone_columns(frame)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         for sheet_name, frame in processed_sheets.items():
