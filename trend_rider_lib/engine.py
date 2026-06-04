@@ -22,6 +22,8 @@ from .state_machine.fsm_serializer import serialize_context, deserialize_context
 from .signals.signal_engine import SignalEngine
 from .trading.trade_manager import TradeManager
 
+import yfinance as yf
+
 from .persistence.interfaces import IStateStore, ISignalStore, ITradeStore
 
 
@@ -89,11 +91,19 @@ class TrendRiderEngine:
                 continue
 
             daily_df = daily_data[ticker].copy()
+            ticker_info = yf.Ticker(ticker).info
             context = self._process_full_history(
                 ticker,
                 daily_df,
                 debug_callback=debug_callback
             )
+            context.longName = ticker_info.get("longName")
+            context.sector = ticker_info.get("sector")
+            context.industry = ticker_info.get("industry")
+            context.marketCap = ticker_info.get("marketCap")
+            context.website = ticker_info.get("website")
+            context.nextDividendDate = ticker_info.get("nextDividendDate")
+            context.isin = ticker_info.get("isin")
 
             # Save final state
             self.state_store.save_context(context)
@@ -197,8 +207,11 @@ class TrendRiderEngine:
             update_classification(fsm.context)
 
             # Save updated state
-            self.state_store.save_context(fsm.context)
-            results[ticker] = fsm.context
+            context = fsm.context
+            ticker_info = yf.Ticker(ticker).info
+            context.marketCap = ticker_info.get("marketCap")
+            self.state_store.save_context(context)
+            results[ticker] = context
 
         return results
 

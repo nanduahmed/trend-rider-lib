@@ -59,3 +59,4 @@ dmypy.json
 trend_rider_report.xlsx
 trend_rider.sqlite
 data/**
+.~*.xlsx#

@@ -1,3 +1,6 @@
+"""
+Trend Rider command line interface.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -30,7 +33,6 @@ console = Console()
 DEFAULT_DB = Path("trend_rider.sqlite")
 DEFAULT_CACHE_DIR = Path("data/cache/output")
 
-
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     mapping = {}
     for column in df.columns:
@@ -50,7 +52,6 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         elif lower == "ticker":
             mapping[column] = "Ticker"
     return df.rename(columns=mapping)
-
 
 def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     df = normalize_columns(df)
@@ -116,6 +117,7 @@ def build_trade_rows(trades: List[TradeRecord]) -> List[Dict[str, str]]:
 def context_to_row(context: StockContext) -> Dict[str, str]:
     return {
         "Ticker": context.ticker,
+        "Name": context.longName,
         "Classification": context.classification.name if context.classification else "UNKNOWN",
         "State": context.current_state.name if hasattr(context.current_state, "name") else str(context.current_state),
         "TR Qualified": "Yes" if context.tr_qualified else "No",
@@ -127,6 +129,12 @@ def context_to_row(context: StockContext) -> Dict[str, str]:
         "Trend End": context.trend_end_date,
         "Daily EMA21 Cross": context.daily_ema21_cross_date,
         "First Buy Zone": context.first_buy_zone_date,
+        "Sector": context.sector,
+        "Industry": context.industry,
+        "Market Cap": context.marketCap,
+        "Website": context.website,
+        "Next DividendDate": context.nextDividendDate,
+        "ISIN": context.isin,
     }
 
 
@@ -277,10 +285,6 @@ def update(
     """Run an incremental update for saved tickers."""
     provider = open_db(db_path)
     contexts = provider.load_all_contexts()
-    if not contexts:
-        # raise typer.Exit(code=1, message="No stored stock contexts found. Run scan first.")
-        console.print("[bold red]No stored stock contexts found. Run scan first.[/bold red]")
-        raise typer.Exit(code=1)
     if tickers:
         contexts = [ctx for ctx in contexts if ctx.ticker in tickers]
         if not contexts:
@@ -404,7 +408,8 @@ def trades(
             f"{trade.profit_loss_pct:.2f}%",
         )
     console.print(table)
-    
+
+
 @app.command()
 def show(
     db_path: Path = typer.Option(DEFAULT_DB, help="SQLite database file for persistence."),
@@ -456,7 +461,7 @@ def show(
         status_table = Table(show_header=False, box=None, padding=(0, 2))
         status_table.add_column("Field", style="bold")
         status_table.add_column("Value")
-
+        
         state_name = (
             ctx.current_state.name
             if hasattr(ctx.current_state, "name")
@@ -474,6 +479,14 @@ def show(
             "Last Updated",
             format_report_date(ctx.last_update) or "—",
         )
+        status_table.add_row("Name", ctx.longName)
+        status_table.add_row("Sector", ctx.sector)
+        status_table.add_row("Industry", ctx.industry)
+        cap_str = f"{ctx.marketCap:,.0f}" if ctx.marketCap is not None else "—"
+        status_table.add_row("Market Cap", cap_str)
+        status_table.add_row("Website", ctx.website)
+        status_table.add_row("Next DividendDate", ctx.nextDividendDate)
+        status_table.add_row("ISIN", ctx.isin)
         console.print(
             Panel(status_table, title=f"[bold cyan]{ctx.ticker}[/bold cyan] — {classification_name}", expand=False)
         )
@@ -603,7 +616,9 @@ def show(
         "classification": lambda c: (c.classification.name if c.classification else ""),
         "uptrend_weeks": lambda c: c.uptrend_weeks,
         "state": lambda c: (
-            c.current_state.name if hasattr(c.current_state, "name") else str(c.current_state)
+            c.current_state.name
+            if hasattr(c.current_state, "name")
+            else str(c.current_state)
         ),
     }
     sort_fn = sort_map.get(sort_by.lower(), sort_map["classification"])
@@ -628,7 +643,7 @@ def show(
     table.add_column("EMA21", justify="right")
     table.add_column("Last Close", justify="right")
     table.add_column("Last Updated")
-
+    
     for ctx in contexts:
         classification_name = (
             ctx.classification.name if ctx.classification else "UNKNOWN"
@@ -655,7 +670,7 @@ def show(
             format_report_date(ctx.last_update) or "—",
             style=row_style,
         )
-
+    
     console.print(table)
 
     # Summary panel
@@ -773,6 +788,8 @@ def backtest(
                 console.print("[yellow]Warning:[/yellow] tickers list and data file tickers do not match; using tickers from data file.")
                 tickers = list(daily_data.keys())
     else:
+        if not tickers:
+            raise typer.BadParameter("At least one ticker is required when no data file is provided.")
         daily_data = YFinanceDownloader.download_bulk(tickers, start_date, end_date)
         if not daily_data:
             # raise typer.Exit(code=1, message="No historical data returned from yfinance.")

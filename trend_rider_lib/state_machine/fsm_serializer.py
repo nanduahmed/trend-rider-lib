@@ -74,7 +74,14 @@ def serialize_context(context: StockContext) -> Dict[str, Any]:
         'candle_count': int(context.candle_count),
         'weekly_candle_count': int(context.weekly_candle_count),
         'current_uptrend': serialize_uptrend(context.current_uptrend) if context.current_uptrend else None,
-        'uptrend_history': [serialize_uptrend(u) for u in context.uptrend_history]
+        'uptrend_history': [serialize_uptrend(u) for u in context.uptrend_history],
+        'longName': context.longName,
+        'sector': context.sector,
+        'industry': context.industry,
+        'marketCap': context.marketCap,
+        'website': context.website,
+        'nextDividendDate': context.nextDividendDate,
+        'isin': context.isin,
     }
 
 
@@ -129,6 +136,15 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
         context.current_uptrend = deserialize_uptrend(data['current_uptrend'])
 
     context.uptrend_history = [deserialize_uptrend(u) for u in data.get('uptrend_history', [])]
+
+    # Restore metadata fields
+    context.longName = data.get('longName')
+    context.sector = data.get('sector')
+    context.industry = data.get('industry')
+    context.marketCap = data.get('marketCap')
+    context.website = data.get('website')
+    context.nextDividendDate = data.get('nextDividendDate')
+    context.isin = data.get('isin')
 
     return context
 

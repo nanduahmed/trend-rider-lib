@@ -70,7 +70,14 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     last_ema55 REAL,
                     last_close REAL,
                     last_updated TEXT,
-                    context_json TEXT
+                    context_json TEXT,
+                    longName TEXT,
+                    sector TEXT,
+                    industry TEXT,
+                    marketCap REAL,
+                    website TEXT,
+                    nextDividendDate TEXT,
+                    isin TEXT
                 )
                 """
             )
@@ -225,8 +232,8 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                  uptrend_weeks, weekly_candle_count, closes_above_ema, closes_below_ema,
                  is_buyzone, is_crossover_detected, crossover_date, crossover_price,
                  classification, last_ema21, last_ema34, last_ema55, last_close,
-                 last_updated, context_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 last_updated, context_json, longName, sector, industry, marketCap, website, nextDividendDate, isin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     context.ticker,
@@ -261,6 +268,13 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     serialized["last_close"],
                     serialized["last_update"],
                     json.dumps(serialized, default=str),
+                    context.longName,
+                    context.sector,
+                    context.industry,
+                    context.marketCap,
+                    context.website,
+                    context.nextDividendDate,
+                    context.isin,
                 ),
             )
 
@@ -270,10 +284,22 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
     def load_context(self, ticker: str) -> Optional[StockContext]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT context_json FROM stock_states WHERE ticker = ?", (ticker,))
+            cursor.execute("""
+                SELECT context_json, longName, sector, industry, marketCap, website, nextDividendDate, isin 
+                FROM stock_states 
+                WHERE ticker=?
+            """, (ticker,))
             row = cursor.fetchone()
             if row:
-                return deserialize_context(json.loads(row[0]))
+                context_dict = json.loads(row[0])
+                context_dict['longName'] = row[1]
+                context_dict['sector'] = row[2]
+                context_dict['industry'] = row[3]
+                context_dict['marketCap'] = row[4]
+                context_dict['website'] = row[5]
+                context_dict['nextDividendDate'] = row[6]
+                context_dict['isin'] = row[7]
+                return StockContext(**context_dict)
             return None
 
     def load_all_contexts(self) -> List[StockContext]:
