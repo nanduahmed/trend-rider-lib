@@ -1,6 +1,7 @@
 """
 FSM state serialization and deserialization for persistence.
 """
+import math
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -13,6 +14,15 @@ def _serialize_history(history):
         [item[0].isoformat() if item[0] else None, item[1]]
         for item in history
     ]
+
+
+def _nan_to_none(value):
+    """Convert NaN to None, return value unchanged otherwise."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
 
 
 def _deserialize_history(data):
@@ -123,10 +133,10 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context.crossover_date = datetime.fromisoformat(data['crossover_date']) if data.get('crossover_date') else None
     context.crossover_price = data.get('crossover_price')
     context.classification = Classification[data['classification']] if data.get('classification') else Classification.UNQUALIFIED
-    context.last_ema21 = data.get('last_ema21')
-    context.last_ema34 = data.get('last_ema34')
-    context.last_ema55 = data.get('last_ema55')
-    context.last_close = data.get('last_close')
+    context.last_ema21 = _nan_to_none(data.get('last_ema21'))
+    context.last_ema34 = _nan_to_none(data.get('last_ema34'))
+    context.last_ema55 = _nan_to_none(data.get('last_ema55'))
+    context.last_close = _nan_to_none(data.get('last_close'))
     context.last_update = datetime.fromisoformat(data['last_update']) if data.get('last_update') else None
     context.warmup_complete = data.get('warmup_complete', False)
     context.candle_count = data.get('candle_count', 0)

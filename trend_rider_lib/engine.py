@@ -91,7 +91,8 @@ class TrendRiderEngine:
                 continue
 
             daily_df = daily_data[ticker].copy()
-            ticker_info = yf.Ticker(ticker).info
+            yf_ticker = yf.Ticker(ticker)
+            ticker_info = yf_ticker.info
             context = self._process_full_history(
                 ticker,
                 daily_df,
@@ -103,7 +104,7 @@ class TrendRiderEngine:
             context.marketCap = ticker_info.get("marketCap")
             context.website = ticker_info.get("website")
             context.nextDividendDate = ticker_info.get("nextDividendDate")
-            context.isin = ticker_info.get("isin")
+            context.isin = yf_ticker.get_isin() if hasattr(yf_ticker, "get_isin") else None
 
             # Save final state
             self.state_store.save_context(context)

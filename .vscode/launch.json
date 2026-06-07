@@ -29,6 +29,17 @@
                 "update",
                 "WINDLAS.NS"
             ],
+        },
+        {
+            "name": "TR Show symbol",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "trend_rider_lib",
+            "args": [
+                "show",
+                "--ticker",
+                "SMLMAH.NS"
+            ],
         }
     ]
 }

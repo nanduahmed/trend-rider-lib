@@ -39,7 +39,7 @@ cli/ app.py commands/ scan.py, update.py, show.py, classify.py, trades.py, repor
 ---
 
 ## Environment
-Always install and execute in venv
+Always install and execute in venv (check existing .venv)
 
 ## Critical Implementation Rules
 

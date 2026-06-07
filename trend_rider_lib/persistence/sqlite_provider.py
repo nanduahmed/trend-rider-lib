@@ -91,12 +91,12 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     trend_start_date TEXT NOT NULL,
                     trend_start_price REAL,
                     trend_end_date TEXT,
-             trend_end_price REAL,
-             daily_ema21_cross_date TEXT,
-             daily_ema21_cross_price REAL,
-             daily_downtrend_trigger_date TEXT,
-             daily_downtrend_trigger_price REAL,
-             first_buy_zone_date TEXT,
+                    trend_end_price REAL,
+                    daily_ema21_cross_date TEXT,
+                    daily_ema21_cross_price REAL,
+                    daily_downtrend_trigger_date TEXT,
+                    daily_downtrend_trigger_price REAL,
+                    first_buy_zone_date TEXT,
                     first_buy_zone_price REAL,
                     start_state TEXT,
                     end_state TEXT,
@@ -299,16 +299,27 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                 context_dict['website'] = row[5]
                 context_dict['nextDividendDate'] = row[6]
                 context_dict['isin'] = row[7]
-                return StockContext(**context_dict)
+                return deserialize_context(context_dict)
             return None
 
     def load_all_contexts(self) -> List[StockContext]:
         contexts = []
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT context_json FROM stock_states")
+            cursor.execute("""
+                SELECT context_json, longName, sector, industry, marketCap, website, nextDividendDate, isin
+                FROM stock_states
+            """)
             for row in cursor.fetchall():
-                contexts.append(deserialize_context(json.loads(row[0])))
+                context_dict = json.loads(row[0])
+                context_dict['longName'] = row[1]
+                context_dict['sector'] = row[2]
+                context_dict['industry'] = row[3]
+                context_dict['marketCap'] = row[4]
+                context_dict['website'] = row[5]
+                context_dict['nextDividendDate'] = row[6]
+                context_dict['isin'] = row[7]
+                contexts.append(deserialize_context(context_dict))
         return contexts
 
     def delete_context(self, ticker: str) -> None:
