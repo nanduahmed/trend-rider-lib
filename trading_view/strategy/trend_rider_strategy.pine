@@ -1,14 +1,14 @@
 //@version=6
 // =============================================================================
-// Financial Nerve – Trend Rider Strategy  v1.0
-// Derived from: trend_rider_v8.pine (indicator)
+// Trend Rider – Strategy
+// Design Reference: trend_rider_lib/design.md
 //
 // Entry  : First daily buy-zone green candle while STATE_UPTREND is active.
 // Exit   : Trade Manager – fixed Target, fixed Stop-Loss, Trailing Stop-Loss.
 // One open trade at a time (Trade Manager gate).
 // =============================================================================
 strategy(
-     title                = "Financial Nerve Trend Rider Strategy",
+     title                = "Trend Rider Strategy",
      shorttitle           = "TR-STR",
      overlay              = true,
      max_labels_count     = 500,

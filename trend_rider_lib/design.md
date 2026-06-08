@@ -1,4 +1,4 @@
-# Trend Rider V0.4 - Design Reference
+# Trend Rider V0.81 - Design Reference
 
 ---
 
@@ -14,23 +14,23 @@
 
 Buy Zone:
 
-* EMA21 < close <= EMA21 * 1.05
+* EMA21 < close <= EMA21 × 1.05
 * Green candle close > open on a daily or weekly candle
 
 Above Buy Zone:
 
-* close > EMA21 * 1.05
+* close > EMA21 × 1.05
 
 Downtrend Trigger:
 
-* close < EMA21 * 0.90
+* close < EMA21 × 0.90
 * Weekly close is the official end boundary
 
 **Boundary Behaviour**
 
 * Daily EMA21 crosses are confirmation evidence only
 * Weekly close above EMA21 is the official uptrend start boundary
-* Weekly close below `0.90 * EMA21` is the official downtrend end boundary
+* Weekly close below `0.90 × EMA21` is the official downtrend end boundary
 * The confirmation week is excluded from `#weeks`, strength, duration, and performance counts
 
 ---
@@ -52,24 +52,23 @@ stateDiagram-v2
     %% Entry Gateway
     OBSERVING --> UPTREND : weekly close > EMA21
 
-    %% Macro Uptrend State
-   %% Macro Uptrend State (Consolidated to 2 Sub-States)
+    %% Macro Uptrend State (Consolidated to 2 Sub-States)
     state UPTREND {
         direction LR
-        [*] --> BUY_ZONE : EMA21 < price < EMA21 * 1.05
-        [*] --> NOT_IN_BUY_ZONE : price <= EMA21 OR price >= EMA21 * 1.05
+        [*] --> BUY_ZONE : EMA21 < price < EMA21 × 1.05
+        [*] --> NOT_IN_BUY_ZONE : price <= EMA21 OR price >= EMA21 × 1.05
         
-        BUY_ZONE --> NOT_IN_BUY_ZONE : weekly close < EMA21 OR weekly close > EMA21 * 1.05
-        NOT_IN_BUY_ZONE --> BUY_ZONE : price enters range (EMA21 < price < EMA21 * 1.05)
+        BUY_ZONE --> NOT_IN_BUY_ZONE : weekly close < EMA21 OR weekly close > EMA21 × 1.05
+        NOT_IN_BUY_ZONE --> BUY_ZONE : price enters range (EMA21 < price < EMA21 × 1.05)
     }
 
     %% Global Macro Exit
-    UPTREND --> DOWNTREND : weekly close < 0.90 * EMA21
+    UPTREND --> DOWNTREND : weekly close < 0.90 × EMA21
 
     %% Recovery Logic
     DOWNTREND --> RECOVERING : weekly close > EMA21
-    RECOVERING --> UPTREND : qualified bullish crossover (daily EMA34 > EMA55 )
-    RECOVERING --> DOWNTREND : weekly close < 0.90 * EMA21
+    RECOVERING --> UPTREND : qualified bullish crossover (daily EMA34 > EMA55)
+    RECOVERING --> DOWNTREND : weekly close < 0.90 × EMA21
 ```
 
 **Key transition rules**
@@ -135,7 +134,7 @@ Strength thresholds:
 | BUY_ENTRY | Daily | First qualifying bullish crossover after trend qualification |
 | REENTRY | Weekly | TR-qualified stock re-enters the buy zone |
 | MOMENTUM_ENTRY | Daily | Qualified bullish crossover during RECOVERING |
-| DOWNTREND_START | Weekly | Weekly close below `0.90 * EMA21` |
+| DOWNTREND_START | Weekly | Weekly close below `0.90 × EMA21` |
 | EMA_CROSSOVER | Daily | EMA34 crosses above EMA55 |
 | TR_QUALIFIED | Weekly | Uptrend weeks hit 40 |
 
@@ -207,7 +206,7 @@ Every signal stores:
 * Daily EMA21 cross is captured as confirmation evidence
 * Official trend start is the weekly close date
 * Confirmation week is excluded from counts
-* Official trend end is the weekly close below `0.90 * EMA21`
+* Official trend end is the weekly close below `0.90 × EMA21`
 * Ending week is excluded from counts
 * `RECOVERING` blocks buy signals
 * No buy before qualification
@@ -216,3 +215,10 @@ Every signal stores:
 * ROC, max profit, ATH, and distance-from-ATH are calculated from the first official buy zone
 * Persistence round-trips the new queryable tables cleanly
 
+---
+
+## 11. Design Change Log
+
+| Date | Description | Affected Components |
+| --- | --- | --- |
+| | | |

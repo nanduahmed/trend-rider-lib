@@ -32,7 +32,7 @@ from .trading import TradeManager, TSLEngine
 from .persistence import SQLiteProvider, IStateStore, ISignalStore, ITradeStore
 from .downloader import YFinanceDownloader
 
-__version__ = "0.3.0"
+__version__ = "0.81"
 
 __all__ = [
     # Core

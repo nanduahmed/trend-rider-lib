@@ -1,5 +1,7 @@
 //@version=6
-indicator("Financial Nerve Trend Rider V0.10", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
+// Financial Nerve – Trend Rider Indicator
+// Design Reference: trend_rider_lib/design.md
+indicator("Trend Rider", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
 
 // =============================================================================
 // INPUTS

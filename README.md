@@ -1,4 +1,4 @@
-# Trend Rider V0.3 Library
+# Trend Rider V0.81 Library
 
 A sophisticated stock trend analysis and trading system using EMA indicators, finite state machine architecture, and trailing stop-loss mechanics for automated trade management.
 
