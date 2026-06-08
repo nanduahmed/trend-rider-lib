@@ -235,6 +235,8 @@ class StockContext:
 
         # Extra fields used by the FSM
         self.daily_ema21_cross_price: Optional[float] = None
+        self.daily_downtrend_trigger_price: Optional[float] = None
+        self.first_buy_zone_price: Optional[float] = None
         self.positive_crossover_price: Optional[float] = None
         self.buy_signal_emitted: bool = False
         self.last_buy_signal_date: Optional[datetime] = None

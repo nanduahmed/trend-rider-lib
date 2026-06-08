@@ -1,4 +1,4 @@
-# Trend Rider V0.3 — Project Rules
+# Trend Rider — Project Rules
 
 ## Package Structure
 Two packages. Strictly separate.
@@ -16,9 +16,21 @@ cli/ app.py commands/ scan.py, update.py, show.py, classify.py, trades.py, repor
 
 ## Hard Rules
 
-## Design of algorithm 
-- For all algorithm design related clarifications, design.md remains the single source of truth
-- When there is a explicity change of design, Update the design.md after clarification
+## Algorithm Design & Modification Protocol
+1. Single Source of Truth
+- `design.md` is the absolute authority for all algorithm design specifications and clarifications.
+
+- Always consult `design.md` before making any modifications to the trend_rider_lib algorithm.
+
+2. Design Change Workflow
+
+    When a request is made to change the core design of `trend_rider_lib` or the associated Pine Script, adhere to the following sequence:
+
+    1. Verify Intent: Ensure the requested update represents an explicit, intentional change to the foundational design.
+
+    2. Clarify & Confirm: Discuss and clarify the technical details with the user to align on the approach.
+
+    3. Execute & Document: Once the user explicitly approves the change, implement the update and immediately document it in design.md.
 
 ### Library
 - NO typer, rich, click, or any UI import
@@ -62,4 +74,17 @@ One-way latch. Once True, never set False. Ever.
 ### EMA Calculations
 Full history: Always use TA-Lib only (talib.EMA)
 Single candle update: incremental formula only EMA_new = close × k + EMA_prev × (1 − k) where k = 2/(period+1)
+
+
+## Pine Scripts
+
+The library provides a indicator and a strategy for TradingView platform using pine scripts. These pine scripts must be exactly according to the design mentioned in `design.md` 
+The design of algorithm, trend_ider_lib and pine script must have exactly same design
+
+### Rules for pine scripts
+
+- All code for pine scripts must live in `trading_view` diretory
+- Refer to `README.md` in `trading_view/docs`
+- Whenever there is a change required in pine scripts, it must strictly not break design of the algorithm unless explitly required
+- Keep indicator and strategy syned so single design
 

@@ -15,6 +15,7 @@ from trend_rider_lib import (
     TrendEventType,
     TrendRiderConfig,
     UptrendRecord,
+    UptrendStrength,
 )
 from trend_rider_lib.persistence import SQLiteProvider
 from trend_rider_lib.state_machine.fsm import StockFSM
@@ -213,8 +214,34 @@ def test_buy_signal_gated_by_qualification_and_duplicate_crosses():
     assert len(buy_signals) == 1
 
 
+def test_active_uptrend_strength_updates_with_weekly_stats():
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.current_uptrend.cycle_id = 1
+
+    for offset, close in enumerate([101.0, 102.0, 99.0, 103.0], start=1):
+        date = pd.Timestamp("2024-01-01") + pd.Timedelta(weeks=offset)
+        fsm.process_weekly_candle(
+            weekly_row(
+                date.strftime("%Y-%m-%d"),
+                close,
+                close + 1.0,
+                close - 1.0,
+                close,
+                100.0,
+            )
+        )
+
+    assert fsm.context.current_uptrend is not None
+    assert fsm.context.current_uptrend.num_weeks == 4
+    assert fsm.context.current_uptrend.closes_above_ema == 3
+    assert fsm.context.current_uptrend.pct_closes_above == pytest.approx(0.75)
+    assert fsm.context.current_uptrend.strength == UptrendStrength.DEVELOPING
+
+
 def test_analytics_and_ath_metrics_from_first_official_buy_zone():
-    uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"), cycle_id=1)
+    uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    uptrend.cycle_id = 1
     uptrend.first_buy_zone_date = pd.Timestamp("2024-01-01")
     uptrend.first_buy_zone_price = 100.0
     uptrend.start_price = 100.0
@@ -257,18 +284,19 @@ def test_normalized_persistence_round_trip(tmp_path):
         trend_start_date=datetime(2024, 1, 1),
         trend_end_date=None,
         daily_ema21_cross_date=datetime(2024, 1, 1),
-        daily_ema21_cross_price=100.0,
         first_buy_zone_date=datetime(2024, 1, 1),
-        first_buy_zone_price=100.0,
-        trend_cycle_id=1,
-        buy_signal_emitted=True,
-        last_buy_signal_date=datetime(2024, 1, 2),
-        last_buy_signal_type=SignalType.BUY_ENTRY,
-        last_buy_signal_crossover_date=datetime(2024, 1, 2),
-        last_close=120.0,
-        last_update=datetime(2024, 1, 2),
     )
-    context.current_uptrend = UptrendRecord(start_date=datetime(2024, 1, 1), cycle_id=1)
+    context.trend_cycle_id = 1
+    context.daily_ema21_cross_price = 100.0
+    context.first_buy_zone_price = 100.0
+    context.buy_signal_emitted = True
+    context.last_buy_signal_date = datetime(2024, 1, 2)
+    context.last_buy_signal_type = SignalType.BUY_ENTRY
+    context.last_buy_signal_crossover_date = datetime(2024, 1, 2)
+    context.last_close = 120.0
+    context.last_update = datetime(2024, 1, 2)
+    context.current_uptrend = UptrendRecord(start_date=datetime(2024, 1, 1))
+    context.current_uptrend.cycle_id = 1
     context.current_uptrend.start_state = State.UPTREND.name
     context.current_uptrend.start_price = 100.0
     context.current_uptrend.first_buy_zone_date = datetime(2024, 1, 1)
@@ -276,6 +304,7 @@ def test_normalized_persistence_round_trip(tmp_path):
     context.current_uptrend.num_weeks = 1
     context.current_uptrend.closes_above_ema = 1
     context.current_uptrend.pct_closes_above = 1.0
+    context.current_uptrend.strength = UptrendStrength.SUPER_STRONG
     context.current_uptrend.highest_price = 130.0
     context.current_uptrend.highest_price_date = datetime(2024, 1, 2)
     context.current_uptrend.max_profit_pct = 30.0
@@ -327,6 +356,7 @@ def test_normalized_persistence_round_trip(tmp_path):
     assert loaded.trend_start_date == datetime(2024, 1, 1)
     assert loaded.current_uptrend is not None
     assert loaded.current_uptrend.max_profit_pct == 30.0
+    assert loaded.current_uptrend.strength == UptrendStrength.SUPER_STRONG
 
     cycles = provider.get_trend_cycles("TEST")
     analytics = provider.get_trend_analytics("TEST")
@@ -335,6 +365,7 @@ def test_normalized_persistence_round_trip(tmp_path):
 
     assert cycles
     assert analytics
+    assert analytics[0].strength == UptrendStrength.SUPER_STRONG
     assert events
     assert latest_signal is not None
     assert latest_signal.timeframe == "daily"

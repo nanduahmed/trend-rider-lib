@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pandas as pd
 
+import trend_rider_lib.engine as engine_module
 from trend_rider_lib import (
     Classification,
     ExitReason,
@@ -62,7 +63,12 @@ def test_signal_and_trade_enum_round_trip(tmp_path):
     assert loaded_trade.exit_reason == ExitReason.TRAILING_STOP
 
 
-def test_incremental_update_restores_open_trades(tmp_path):
+def test_incremental_update_restores_open_trades(tmp_path, monkeypatch):
+    class FakeTicker:
+        info = {"marketCap": 123}
+
+    monkeypatch.setattr(engine_module.yf, "Ticker", lambda _ticker: FakeTicker())
+
     db_path = tmp_path / "trend_rider.sqlite"
     provider = SQLiteProvider(str(db_path))
     config = TrendRiderConfig()
@@ -73,9 +79,9 @@ def test_incremental_update_restores_open_trades(tmp_path):
         current_state=State.BUY_ZONE,
         tr_qualified=False,
         last_ema21=100.0,
-        last_update=datetime(2024, 1, 1),
-        classification=Classification.UNQUALIFIED,
     )
+    context.last_update = datetime(2024, 1, 1)
+    context.classification = Classification.UNQUALIFIED
     provider.save_context(context)
 
     provider.save_trade(

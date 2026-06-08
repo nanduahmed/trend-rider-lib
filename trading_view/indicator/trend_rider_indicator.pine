@@ -1,0 +1,534 @@
+//@version=6
+indicator("Financial Nerve Trend Rider V0.10", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+rulesGroup      = "Rules"
+visibilityGroup = "Visibility"
+colorsGroup     = "Colors"
+tableGroup      = "Table"
+
+warmupWeeks        = input.int(25, "Warm-up weeks", minval=1, group=rulesGroup)
+weeklyEmaLen       = input.int(21, "Weekly EMA length", minval=1, group=rulesGroup)
+dailyFastLen       = input.int(34, "Daily fast EMA length", minval=1, group=rulesGroup)
+dailySlowLen       = input.int(55, "Daily slow EMA length", minval=1, group=rulesGroup)
+qualificationWeeks = input.int(40, "Qualification weeks", minval=1, group=rulesGroup)
+minStrengthPct     = input.float(70.0, "Minimum strength %", minval=0.0, maxval=100.0, step=0.5, group=rulesGroup)
+buyZoneMax         = input.float(1.05, "Buy zone upper multiplier", minval=1.0, step=0.01, group=rulesGroup)
+breakThreshold     = input.float(0.90, "Break threshold multiplier", minval=0.1, maxval=1.0, step=0.01, group=rulesGroup)
+
+showWeeklyEma      = input.bool(true, "Show weekly EMA", group=visibilityGroup)
+showDailyEmas      = input.bool(true, "Show daily EMAs", group=visibilityGroup)
+showBuyZone        = input.bool(true, "Show buy zone", group=visibilityGroup)
+showTrendStarts    = input.bool(true, "Show trend starts", group=visibilityGroup)
+showTrendEnds      = input.bool(true, "Show trend ends", group=visibilityGroup)
+showReentries      = input.bool(true, "Show reentries", group=visibilityGroup)
+showConfirmations  = input.bool(true, "Show daily confirmations", group=visibilityGroup)
+showSummaryLabels  = input.bool(true, "Show trend summary labels", group=visibilityGroup)
+showTrendTable     = input.bool(true, "Show trend table", group=visibilityGroup)
+
+weeklyEmaColor     = input.color(color.rgb(0, 88, 255), "Weekly EMA21 color", group=colorsGroup)
+dailyFastColor     = input.color(color.rgb(0, 100, 0), "Daily EMA34 color", group=colorsGroup)
+dailySlowColor     = input.color(color.rgb(220, 0, 0), "Daily EMA55 color", group=colorsGroup)
+startColor         = input.color(color.rgb(0, 150, 80), "Trend start marker", group=colorsGroup)
+endColor           = input.color(color.rgb(220, 40, 40), "Trend end marker", group=colorsGroup)
+reentryColor       = input.color(color.rgb(0, 105, 200), "Reentry marker", group=colorsGroup)
+confirmationColor  = input.color(color.rgb(145, 70, 190), "Confirmation marker", group=colorsGroup)
+buyZoneColor       = input.color(color.new(color.rgb(0, 170, 90), 75), "Buy zone fill", group=colorsGroup)
+buyZoneExitColor   = input.color(color.new(#f63f3f, 75), "Buy zone lower fill", group=colorsGroup)
+tableHeaderColor   = input.color(color.rgb(35, 35, 35), "Table header", group=colorsGroup)
+tableTextColor     = input.color(color.white, "Table text", group=colorsGroup)
+tableBodyColor     = input.color(color.new(color.rgb(35, 35, 35), 12), "Table body", group=colorsGroup)
+
+tablePositionInput = input.string("Top Right", "Table position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=tableGroup)
+tableTextSizeInput = input.string("Small", "Table text size", options=["Tiny", "Small", "Normal"], group=tableGroup)
+maxStoredTrends    = input.int(8, "Recent trends in table", minval=1, maxval=20, group=tableGroup)
+
+// =============================================================================
+// UTILITY
+// =============================================================================
+f_table_position(value) =>
+    switch value
+        "Top Left"     => position.top_left
+        "Bottom Right" => position.bottom_right
+        "Bottom Left"  => position.bottom_left
+        => position.top_right
+
+f_text_size(value) =>
+    switch value
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        => size.small
+
+f_bool(value) => value ? "Y" : "N"
+
+f_strength_class(strength) =>
+    strength < 70.0 ? "Weak" :
+     strength < 80.0 ? "Developing" :
+     strength < 90.0 ? "Moderate" :
+     strength < 100.0 ? "Strong" : "Super"
+
+f_date(ts) => na(ts) ? "-" : str.format_time(ts, "yyyy-MM-dd")
+
+// CE10088-safe: pure formatter, no outer-scope scalar mutation.
+f_summary_text(id, status, startTs, endTs, weeks, strength, strengthClass, highValue, lowValue, buyZone, qualified, classification) =>
+    "Trend " + str.tostring(id) +
+     "\nStatus: " + status +
+     "\nStart: " + f_date(startTs) +
+     "\nEnd: " + f_date(endTs) +
+     "\nWeeks: " + str.tostring(weeks) +
+     "\nStrength: " + str.tostring(strength, "#.##") + "% (" + strengthClass + ")" +
+     "\nHigh: " + str.tostring(highValue, format.mintick) +
+     "\nLow: " + str.tostring(lowValue, format.mintick) +
+     "\nBuy Zone: " + f_bool(buyZone) +
+     "\nQualified: " + f_bool(qualified) +
+     "\nClass: " + classification
+
+f_draw_label(x, y, txt, tip, style, clr) =>
+    if barstate.isconfirmed
+        label.new(x=x, y=y, text=txt, xloc=xloc.bar_time, yloc=yloc.price, style=style, color=clr, textcolor=color.white, size=size.small, tooltip=tip)
+
+f_note_suffix(note) =>
+    note == "" ? "" : "\nNote: " + note
+
+// CE10088-safe: only reference-type array mutation.
+f_store_trend_at(ids, statuses, starts, ends, weeksArr, strengths, classes, buyZones, qualifiedArr, idx, id, status, startTs, endTs, weeks, strength, strengthClass, buyZone, isQualified) =>
+    array.set(ids, idx, id)
+    array.set(statuses, idx, status)
+    array.set(starts, idx, startTs)
+    array.set(ends, idx, endTs)
+    array.set(weeksArr, idx, weeks)
+    array.set(strengths, idx, strength)
+    array.set(classes, idx, strengthClass)
+    array.set(buyZones, idx, buyZone)
+    array.set(qualifiedArr, idx, isQualified)
+
+f_daily_context() =>
+    _ema21 = ta.ema(close, 21)
+    _ema34 = ta.ema(close, dailyFastLen)
+    _ema55 = ta.ema(close, dailySlowLen)
+    _crossFastSlow = ta.crossover(_ema34, _ema55)
+    _crossCloseEma21 = ta.crossover(close, _ema21)
+    _barsSinceCross = ta.barssince(_crossFastSlow)
+    _barsSinceWeek = ta.barssince(ta.change(time("W")) != 0)
+    _crossWithinWeek = not na(_barsSinceCross) and (na(_barsSinceWeek) or _barsSinceCross <= _barsSinceWeek)
+    _crossTime = _crossWithinWeek ? ta.valuewhen(_crossFastSlow, time, 0) : int(na)
+    _crossPrice = _crossWithinWeek ? ta.valuewhen(_crossFastSlow, close, 0) : na
+    [close, time, _ema21, _ema34, _ema55, _crossFastSlow, _crossCloseEma21, _crossWithinWeek, _crossTime, _crossPrice]
+
+// =============================================================================
+// MTF DATA LAYER (isolated, non-repainting)
+// =============================================================================
+[weeklyClose, weeklyHigh, weeklyLow, weeklyTime, weeklyEma, weeklyOpen, weeklyBarIndex] = request.security(
+     syminfo.tickerid, "W",
+     // Use time_close so weekly events anchor to the completed week close, not the week open.
+     [close, high, low, time_close, ta.ema(close, weeklyEmaLen), open, bar_index],
+     barmerge.gaps_off, barmerge.lookahead_off)
+
+[dailyClose, dailyTime, dailyEma21, dailyEma34, dailyEma55, dailyCrossFastSlow, dailyCrossCloseEma21, dailyCrossFastSlowWithinWeek, dailyCrossFastSlowTime, dailyCrossFastSlowPrice] = request.security(
+     syminfo.tickerid, "D",
+     f_daily_context(),
+     barmerge.gaps_off, barmerge.lookahead_off)
+
+// =============================================================================
+// DERIVED FLAGS / CALCS
+// =============================================================================
+// On a non-weekly chart, newWeek fires on the first bar of the NEW week,
+// meaning weeklyTime has already rolled forward. We want the timestamp of
+// the week that just *closed*, which is weeklyTime[1] at that moment.
+var int weeklyMarkerTime = na
+if ta.change(weeklyTime) != 0
+    // Weekly charts already sit on the completed week; lower timeframes tick on the next week.
+    weeklyMarkerTime := timeframe.isweekly ? weeklyTime[1] : weeklyTime
+
+newWeek = ta.change(weeklyTime) != 0
+// log.info("newWeek {0} ta.change(dailyTime) {1}", newWeek, ta.change(dailyTime))
+
+newDailyBar = timeframe.isdaily ? barstate.isconfirmed : ta.change(dailyTime) != 0
+newDailyFastSlowCross = timeframe.isweekly ? newWeek and dailyCrossFastSlowWithinWeek : newDailyBar and dailyCrossFastSlow
+newDailyEma21Cross = newDailyBar and dailyCrossCloseEma21
+
+pastWarmup = weeklyBarIndex >= warmupWeeks
+aboveWeeklyEma = weeklyClose > weeklyEma
+buyZoneGreenCandle = weeklyClose > weeklyOpen
+inBuyZone = aboveWeeklyEma and weeklyClose <= weeklyEma * buyZoneMax and buyZoneGreenCandle
+inAboveBuyZone = weeklyClose > weeklyEma * buyZoneMax
+trendBreak = weeklyClose < weeklyEma * breakThreshold
+
+buyZoneTop = weeklyEma * buyZoneMax
+buyZoneBottom = weeklyEma * breakThreshold
+
+// =============================================================================
+// FSM CONSTANTS / STATE
+// =============================================================================
+var int STATE_WARMUP = 0
+var int STATE_OBSERVING = 1
+var int STATE_UPTREND = 2
+var int STATE_DOWNTREND = 3
+var int STATE_RECOVERING = 4
+
+var int state = STATE_WARMUP
+
+// trend lifecycle
+var bool tr_qualified = false
+var int trendId = 0
+var int trendWeeks = 0
+var int closesAbove = 0
+var int closesBelow = 0
+var int trendStartTime = na
+var float trendHigh = na
+var float trendLow = na
+var string currentClassification = "UNQUALIFIED"
+var label currentTrendLabel = na
+
+// evidence + analytics
+var int firstBuyZoneTime = na
+var float firstBuyZonePrice = na
+var int dailyEma21CrossTime = na
+var float dailyEma21CrossPrice = na
+var int dailyPositiveCrossoverTime = na
+var float dailyPositiveCrossoverPrice = na
+var int dailyDowntrendTriggerTime = na
+var float dailyDowntrendTriggerPrice = na
+var int recoveryConfirmedWeekTime = na
+var float maxProfitPct = 0.0
+
+// signal duplication guards
+var bool buySignalEmitted = false
+var bool qualifiedSignalEmitted = false
+var bool momentumSignalEmitted = false
+var bool dailyCrossoverConfirmed = false
+var bool momentumEntryPendingLabel = false
+var bool positiveCrossoverLabelPending = false
+var bool recoveryPositiveCrossoverNote = false
+
+// signal event flags for alerts/table refresh
+var bool sigUptrendStart = false
+var bool sigReentry = false
+var bool sigMomentumEntry = false
+var bool sigDowntrendStart = false
+var bool sigEmaCrossover = false
+var bool sigTrQualified = false
+
+// performance cache
+var bool tableNeedsRebuild = true
+var float currentStrength = 0.0
+var string currentStrengthClass = "Weak"
+var string summaryCache = ""
+
+// =============================================================================
+// CIRCULAR BUFFER (O(1))
+// =============================================================================
+var array<int> trendIds = array.new_int(maxStoredTrends, 0)
+var array<string> trendStatuses = array.new_string(maxStoredTrends, "")
+var array<int> trendStarts = array.new_int(maxStoredTrends, na)
+var array<int> trendEnds = array.new_int(maxStoredTrends, na)
+var array<int> trendWeeksArr = array.new_int(maxStoredTrends, 0)
+var array<float> trendStrengths = array.new_float(maxStoredTrends, 0.0)
+var array<string> trendClasses = array.new_string(maxStoredTrends, "")
+var array<bool> trendBuyZones = array.new_bool(maxStoredTrends, false)
+var array<bool> trendQualified = array.new_bool(maxStoredTrends, false)
+var int trendBufferIdx = 0
+
+// =============================================================================
+// UI LAYER - PLOTS / FILLS
+// =============================================================================
+plot(showWeeklyEma ? weeklyEma : na, "Weekly EMA21", weeklyEmaColor, 2)
+plot(showDailyEmas and not timeframe.isweekly ? dailyEma34 : na, "Daily EMA34", dailyFastColor, 1)
+plot(showDailyEmas and not timeframe.isweekly ? dailyEma55 : na, "Daily EMA55", dailySlowColor, 1)
+
+buyZoneUpperPlot = plot(showBuyZone ? buyZoneTop : na, "Buy Zone Upper (Resistance)", color.new(startColor, 80), linewidth=2)
+buyZoneMidPlot = plot(weeklyEma, "EMA21", color.new(startColor, 80), linewidth=1)
+buyZoneLowerPlot = plot(showBuyZone ? buyZoneBottom : na, "Buy Zone Lower (Support)", color.new(endColor, 80), linewidth=1)
+
+fill(buyZoneUpperPlot, buyZoneMidPlot, color=showBuyZone ? buyZoneColor : na, title="Buy Zone Fill")
+fill(buyZoneLowerPlot, buyZoneMidPlot, color=showBuyZone ? buyZoneExitColor : na, title="Exit Zone Fill")
+bgcolor(showBuyZone and inBuyZone ? color.new(buyZoneColor, 90) : na, title="Active Buy Zone Background")
+
+// =============================================================================
+// DAILY EVIDENCE / SIGNAL PREP
+// =============================================================================
+sigUptrendStart := false
+sigReentry := false
+sigMomentumEntry := false
+sigDowntrendStart := false
+sigEmaCrossover := false
+sigTrQualified := false
+
+if newDailyEma21Cross and state == STATE_OBSERVING
+    dailyEma21CrossTime := int(dailyTime)
+    dailyEma21CrossPrice := dailyEma21
+
+if newDailyFastSlowCross
+    sigEmaCrossover := true
+    if state == STATE_DOWNTREND or state == STATE_RECOVERING
+        if not dailyCrossoverConfirmed
+            dailyPositiveCrossoverTime := timeframe.isweekly ? int(dailyCrossFastSlowTime) : int(dailyTime)
+            dailyPositiveCrossoverPrice := timeframe.isweekly ? dailyCrossFastSlowPrice : dailyClose
+            if state == STATE_RECOVERING
+                recoveryConfirmedWeekTime := weeklyMarkerTime
+        dailyCrossoverConfirmed := true
+        positiveCrossoverLabelPending := true
+        if tr_qualified
+            momentumEntryPendingLabel := true
+
+// =============================================================================
+// FSM LAYER
+// =============================================================================
+if newWeek and not na(weeklyEma)
+    prevState = state
+
+    if state == STATE_WARMUP
+        if pastWarmup
+            state := STATE_OBSERVING
+
+    else if state == STATE_OBSERVING
+        if aboveWeeklyEma
+            trendId += 1
+            state := STATE_UPTREND
+            trendWeeks := 0
+            closesAbove := 0
+            closesBelow := 0
+            trendStartTime := weeklyMarkerTime
+            trendHigh := weeklyHigh
+            trendLow := weeklyLow
+            firstBuyZoneTime := inBuyZone ? weeklyMarkerTime : na
+            firstBuyZonePrice := inBuyZone ? weeklyClose : na
+            maxProfitPct := 0.0
+            buySignalEmitted := false
+            dailyCrossoverConfirmed := false
+            momentumSignalEmitted := false
+            positiveCrossoverLabelPending := false
+            recoveryPositiveCrossoverNote := false
+            dailyPositiveCrossoverTime := na
+            dailyPositiveCrossoverPrice := na
+            qualifiedSignalEmitted := tr_qualified
+            sigUptrendStart := true
+            if showTrendStarts
+                _tipObs = f_summary_text(trendId, "Started (confirmation week excluded)", trendStartTime, int(na), 0, 100.0, "Super", trendHigh, trendLow, inBuyZone, tr_qualified, "UNQUALIFIED")
+                f_draw_label(weeklyMarkerTime, weeklyLow, "TREND START", _tipObs, label.style_label_up, startColor)
+
+    else if state == STATE_UPTREND
+        trendWeeks += 1
+        closesAbove += aboveWeeklyEma ? 1 : 0
+        closesBelow += aboveWeeklyEma ? 0 : 1
+        trendHigh := math.max(trendHigh, weeklyHigh)
+        trendLow := math.min(trendLow, weeklyLow)
+
+        // lazy analytics only on weekly transitions
+        currentStrength := trendWeeks > 0 ? closesAbove / trendWeeks * 100.0 : 0.0
+        currentStrengthClass := f_strength_class(currentStrength)
+
+        if na(firstBuyZoneTime) and inBuyZone
+            firstBuyZoneTime := weeklyTime
+            firstBuyZonePrice := weeklyClose
+
+        if trendWeeks >= qualificationWeeks and currentStrength >= minStrengthPct and not tr_qualified
+            tr_qualified := true
+            qualifiedSignalEmitted := false
+            sigTrQualified := true
+
+        if not na(firstBuyZonePrice) and firstBuyZonePrice > 0
+            maxProfitPct := math.max(maxProfitPct, (weeklyHigh - firstBuyZonePrice) / firstBuyZonePrice * 100.0)
+
+        if trendBreak
+            _endStrength = trendWeeks > 0 ? closesAbove / trendWeeks * 100.0 : 0.0
+            _endClass = f_strength_class(_endStrength)
+            f_store_trend_at(trendIds, trendStatuses, trendStarts, trendEnds, trendWeeksArr, trendStrengths, trendClasses, trendBuyZones, trendQualified, trendBufferIdx, trendId, "Ended", trendStartTime, weeklyMarkerTime, trendWeeks, _endStrength, _endClass, inBuyZone, tr_qualified)
+            trendBufferIdx := (trendBufferIdx + 1) % maxStoredTrends
+
+            dailyDowntrendTriggerTime := weeklyMarkerTime
+            dailyDowntrendTriggerPrice := weeklyClose
+            sigDowntrendStart := true
+            dailyPositiveCrossoverTime := na
+            dailyPositiveCrossoverPrice := na
+
+            if showTrendEnds
+                _endTip = f_summary_text(trendId, "Ended", trendStartTime, weeklyMarkerTime, trendWeeks, _endStrength, _endClass, trendHigh, trendLow, inBuyZone, tr_qualified, tr_qualified ? "QUALIFIED" : "UNQUALIFIED")
+                f_draw_label(weeklyMarkerTime, weeklyHigh, "DOWNTREND", _endTip, label.style_label_down, endColor)
+
+            state := STATE_DOWNTREND
+            buySignalEmitted := false
+            dailyCrossoverConfirmed := false
+            momentumSignalEmitted := false
+            momentumEntryPendingLabel := false
+            positiveCrossoverLabelPending := false
+            recoveryPositiveCrossoverNote := false
+
+    else if state == STATE_DOWNTREND
+        if aboveWeeklyEma
+            state := STATE_RECOVERING
+            momentumSignalEmitted := false
+            recoveryPositiveCrossoverNote := false
+            if showReentries
+                f_draw_label(weeklyMarkerTime, weeklyLow, "RECOVERY", "Weekly close moved back above EMA21 (recovery phase)", label.style_label_up, reentryColor)
+
+    else if state == STATE_RECOVERING
+        if trendBreak
+            state := STATE_DOWNTREND
+            dailyCrossoverConfirmed := false
+            momentumSignalEmitted := false
+            momentumEntryPendingLabel := false
+            positiveCrossoverLabelPending := false
+            recoveryPositiveCrossoverNote := false
+            dailyPositiveCrossoverTime := na
+            dailyPositiveCrossoverPrice := na
+            recoveryConfirmedWeekTime := na
+        else if aboveWeeklyEma and dailyCrossoverConfirmed
+            _recoveryTrendStartTime = nz(recoveryConfirmedWeekTime, weeklyMarkerTime)
+            trendId += 1
+            state := STATE_UPTREND
+            trendWeeks := 0
+            closesAbove := 0
+            closesBelow := 0
+            trendStartTime := _recoveryTrendStartTime
+            trendHigh := weeklyHigh
+            trendLow := weeklyLow
+            firstBuyZoneTime := inBuyZone ? weeklyMarkerTime : na
+            firstBuyZonePrice := inBuyZone ? weeklyClose : na
+            maxProfitPct := 0.0
+            buySignalEmitted := false
+            dailyCrossoverConfirmed := false
+            momentumSignalEmitted := false
+            positiveCrossoverLabelPending := false
+            recoveryPositiveCrossoverNote := true
+            qualifiedSignalEmitted := tr_qualified
+            sigUptrendStart := true
+            if showTrendStarts
+                _recoveryStartX = timeframe.isweekly ? _recoveryTrendStartTime : nz(dailyPositiveCrossoverTime, weeklyMarkerTime)
+                _recoveryStartY = timeframe.isweekly ? weeklyLow : nz(dailyPositiveCrossoverPrice, weeklyLow)
+                _recStartTip = f_summary_text(trendId, "Started (recovery reset)", trendStartTime, int(na), 0, 100.0, "Super", trendHigh, trendLow, inBuyZone, tr_qualified, "UNQUALIFIED") + f_note_suffix("Positive Crossover")
+                f_draw_label(_recoveryStartX, _recoveryStartY, "TREND START", _recStartTip, label.style_label_up, startColor)
+            momentumEntryPendingLabel := false
+            dailyPositiveCrossoverTime := na
+            dailyPositiveCrossoverPrice := na
+            recoveryConfirmedWeekTime := na
+
+    if state != prevState
+        tableNeedsRebuild := true
+
+// =============================================================================
+// SIGNAL LAYER
+// =============================================================================
+if sigTrQualified and not qualifiedSignalEmitted
+    qualifiedSignalEmitted := true
+    if showConfirmations
+        f_draw_label(weeklyMarkerTime, weeklyLow, "TR QUALIFIED", "Trend reached qualification threshold", label.style_label_up, startColor)
+    tableNeedsRebuild := true
+
+if state == STATE_UPTREND and tr_qualified and newDailyFastSlowCross and not buySignalEmitted
+    buySignalEmitted := true
+    tableNeedsRebuild := true
+
+if state == STATE_RECOVERING and tr_qualified and newDailyFastSlowCross and not momentumSignalEmitted
+    momentumSignalEmitted := true
+    sigMomentumEntry := true
+    momentumEntryPendingLabel := true
+    tableNeedsRebuild := true
+
+if state == STATE_UPTREND and tr_qualified and newWeek and inBuyZone and not inBuyZone[1]
+    sigReentry := true
+    tableNeedsRebuild := true
+
+if sigUptrendStart or sigDowntrendStart or sigEmaCrossover
+    tableNeedsRebuild := true
+
+if timeframe.isweekly and newWeek and positiveCrossoverLabelPending and not sigUptrendStart
+    if showConfirmations
+        f_draw_label(weeklyMarkerTime, weeklyLow, "Positive Crossover", "Daily EMA34 crossed above EMA55 during this week", label.style_label_up, confirmationColor)
+    positiveCrossoverLabelPending := false
+
+if newWeek and showConfirmations and momentumEntryPendingLabel and (state == STATE_RECOVERING or state == STATE_UPTREND)
+    f_draw_label(weeklyMarkerTime, weeklyLow, "MOMENTUM", "Positive Crossover during RECOVERING phase", label.style_label_up, color.orange)
+    momentumEntryPendingLabel := false
+
+// =============================================================================
+// CLASSIFICATION (lazy / top-level)
+// =============================================================================
+if state == STATE_RECOVERING or not tr_qualified
+    currentClassification := "UNQUALIFIED"
+else if state == STATE_UPTREND
+    if trendWeeks >= qualificationWeeks
+        currentClassification := buySignalEmitted ? "PRIME" : "PRIME_WAITLIST"
+    else
+        currentClassification := buySignalEmitted ? "MOMENTUM" : "MOMENTUM_WAITLIST"
+else
+    currentClassification := tr_qualified ? "WATCHING" : "UNQUALIFIED"
+
+if (showSummaryLabels or showTrendTable) and (barstate.islast or newWeek)
+    currentStrength := trendWeeks > 0 ? closesAbove / trendWeeks * 100.0 : 0.0
+    currentStrengthClass := f_strength_class(currentStrength)
+    _status = state == STATE_UPTREND ? "Active" : state == STATE_RECOVERING ? "Recovering" : "Watching"
+    _summaryNote = recoveryPositiveCrossoverNote ? f_note_suffix("Positive Crossover") : ""
+    summaryCache := f_summary_text(trendId, _status, trendStartTime, int(na), trendWeeks, currentStrength, currentStrengthClass, trendHigh, trendLow, inBuyZone, tr_qualified, currentClassification) + _summaryNote
+
+// =============================================================================
+// SUMMARY LABEL
+// =============================================================================
+if barstate.islast
+    if showSummaryLabels and (state == STATE_UPTREND or state == STATE_RECOVERING)
+        if not na(currentTrendLabel)
+            label.delete(currentTrendLabel)
+        currentTrendLabel := label.new(
+             x=time, y=high, text="Current Trend", xloc=xloc.bar_time, yloc=yloc.price,
+             style=label.style_label_left, color=recoveryPositiveCrossoverNote ? confirmationColor : (tr_qualified ? startColor : reentryColor),
+             textcolor=color.white, size=size.small, tooltip=summaryCache)
+    else if not na(currentTrendLabel)
+        label.delete(currentTrendLabel)
+        currentTrendLabel := na
+
+// =============================================================================
+// TABLE (Outcome column removed; 7 columns)
+// =============================================================================
+var table trendTable = table.new(f_table_position(tablePositionInput), 7, 22, border_width=1)
+
+if barstate.islast and showTrendTable and tableNeedsRebuild
+    table.clear(trendTable, 0, 0, 6, 21)
+    _sz = f_text_size(tableTextSizeInput)
+    _headers = array.from("#", "Status", "Start", "End", "Weeks", "Strength", "Class")
+
+    for col = 0 to 6
+        table.cell(trendTable, col, 0, array.get(_headers, col), bgcolor=tableHeaderColor, text_color=tableTextColor, text_size=_sz)
+
+    _actStatusBase = state == STATE_UPTREND ? (tr_qualified ? "ACTIVE" : "Active") : state == STATE_RECOVERING ? "Recovering" : "–"
+    _actStatus = recoveryPositiveCrossoverNote and (state == STATE_UPTREND or state == STATE_RECOVERING) ? _actStatusBase : _actStatusBase
+    _actId = state == STATE_UPTREND or state == STATE_RECOVERING ? str.tostring(trendId) : "–"
+    _actStart = state == STATE_UPTREND or state == STATE_RECOVERING ? f_date(trendStartTime) : "–"
+    _actWeeks = state == STATE_UPTREND or state == STATE_RECOVERING ? str.tostring(trendWeeks) : "–"
+    _actStr = (state == STATE_UPTREND or state == STATE_RECOVERING) and trendWeeks > 0 ? str.tostring(closesAbove / trendWeeks * 100.0, "#.##") + "%" : "–"
+    _actCls = (state == STATE_UPTREND or state == STATE_RECOVERING) and trendWeeks > 0 ? f_strength_class(closesAbove / trendWeeks * 100.0) : "–"
+
+    table.cell(trendTable, 0, 1, _actId, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 1, 1, _actStatus, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 2, 1, _actStart, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 3, 1, "–", bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 4, 1, _actWeeks, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 5, 1, _actStr, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+    table.cell(trendTable, 6, 1, _actCls, bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+
+    for i = 0 to maxStoredTrends - 1
+        _id = array.get(trendIds, i)
+        if _id > 0
+            _row = i + 2
+            table.cell(trendTable, 0, _row, str.tostring(_id), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 1, _row, array.get(trendStatuses, i), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 2, _row, f_date(array.get(trendStarts, i)), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 3, _row, f_date(array.get(trendEnds, i)), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 4, _row, str.tostring(array.get(trendWeeksArr, i)), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 5, _row, str.tostring(array.get(trendStrengths, i), "#.##") + "%", bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+            table.cell(trendTable, 6, _row, array.get(trendClasses, i), bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
+
+    tableNeedsRebuild := false
+else if barstate.islast and not showTrendTable
+    table.clear(trendTable, 0, 0, 6, 21)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+alertcondition(sigUptrendStart, "Trend Rider - UPTREND_START", "Weekly uptrend start confirmed")
+alertcondition(sigReentry, "Trend Rider - REENTRY", "Qualified re-entry into buy zone")
+alertcondition(sigMomentumEntry, "Trend Rider - MOMENTUM_ENTRY", "Momentum entry in recovering phase")
+alertcondition(sigDowntrendStart, "Trend Rider - DOWNTREND_START", "Weekly downtrend start below break threshold")
+alertcondition(sigEmaCrossover, "Trend Rider - POSITIVE_CROSSOVER", "Daily Positive Crossover (EMA34 crossed above EMA55)")
+alertcondition(sigTrQualified, "Trend Rider - TR_QUALIFIED", "Trend reached qualification threshold")
