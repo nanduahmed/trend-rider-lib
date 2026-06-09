@@ -10,6 +10,12 @@ Default EMA colors:
 - Daily EMA34: dark green
 - Daily EMA55: red
 
+Buy zone interval rule:
+
+- Weekly trend qualification and weekly buy-zone state continue to use weekly OHLC and weekly EMA21.
+- Buy-zone marking on daily or any non-weekly chart must use the chart interval's own OHLC data directly: green interval candle, interval close above weekly EMA21, and interval open at or below `weekly EMA21 * buyZoneMax`.
+- Do not drive chart-interval buy-zone background marking from a higher-timeframe `request.security` OHLC result. Higher-timeframe data may provide the EMA band, but the interval bar being marked must satisfy the buy-zone candle rule itself.
+
 # Instructions for Change
 
 - The scripts derive their algorithm design strictly from `design.md` (located at `trend_rider_lib/design.md`)

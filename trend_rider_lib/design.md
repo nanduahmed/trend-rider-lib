@@ -14,8 +14,10 @@
 
 Buy Zone:
 
-* EMA21 < close <= EMA21 × 1.05
 * Green candle close > open on a daily or weekly candle
+* close > EMA21
+* open <= EMA21 × 1.05
+* A candle may close above EMA21 × 1.05 and still qualify if it opened below or inside the upper boundary
 
 Above Buy Zone:
 
@@ -55,11 +57,11 @@ stateDiagram-v2
     %% Macro Uptrend State (Consolidated to 2 Sub-States)
     state UPTREND {
         direction LR
-        [*] --> BUY_ZONE : EMA21 < price < EMA21 × 1.05
-        [*] --> NOT_IN_BUY_ZONE : price <= EMA21 OR price >= EMA21 × 1.05
+        [*] --> BUY_ZONE : green candle close > EMA21 and open <= EMA21 × 1.05
+        [*] --> NOT_IN_BUY_ZONE : no qualifying green candle
         
-        BUY_ZONE --> NOT_IN_BUY_ZONE : weekly close < EMA21 OR weekly close > EMA21 × 1.05
-        NOT_IN_BUY_ZONE --> BUY_ZONE : price enters range (EMA21 < price < EMA21 × 1.05)
+        BUY_ZONE --> NOT_IN_BUY_ZONE : no qualifying green candle
+        NOT_IN_BUY_ZONE --> BUY_ZONE : green candle close > EMA21 and open <= EMA21 × 1.05
     }
 
     %% Global Macro Exit
@@ -158,6 +160,8 @@ Every signal stores:
 ## 7. Trade Manager
 
 * Entry on `BUY_ENTRY`, `REENTRY`, or `MOMENTUM_ENTRY`
+* Daily market-on-close buy entries use `min(close, EMA21 × 1.05)` as the base fill price
+* Daily entry fill price applies default slippage of `0.0005`: `execution_price = base_fill_price × (1 + slippage)`
 * One open trade per stock at a time
 * A new eligible signal can still be persisted even if the trade manager declines to open another trade
 * Target, stop loss, and trailing stop logic remain unchanged
@@ -221,4 +225,5 @@ Every signal stores:
 
 | Date | Description | Affected Components |
 | --- | --- | --- |
-| | | |
+| 2026-06-09 | Clarified Pine buy-zone background marking: daily and other non-weekly chart intervals must test the chart interval's own OHLC directly; higher-timeframe security data may provide EMA band context but must not replace the interval OHLC candle rule. | Pine indicator, Pine strategy, TradingView docs |
+| 2026-06-09 | Refined Buy Zone to green candles with close above EMA21 and open at or below the upper band; capped daily MOC entry fills at the upper band before applying 0.05% slippage. | `trend_rider_lib`, Pine indicator, Pine strategy, tests |

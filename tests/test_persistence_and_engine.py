@@ -4,6 +4,7 @@ Tests for persistence round-trips and incremental engine restoration.
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 import trend_rider_lib.engine as engine_module
 from trend_rider_lib import (
@@ -124,3 +125,46 @@ def test_incremental_update_restores_open_trades(tmp_path, monkeypatch):
     assert closed_trade is not None
     assert closed_trade.status == TradeStatus.CLOSED_TARGET
     assert engine.trade_manager.trade_id_counter >= 7
+
+
+def test_daily_buy_entry_uses_market_on_close_slippage(tmp_path):
+    db_path = tmp_path / "trend_rider.sqlite"
+    provider = SQLiteProvider(str(db_path))
+    engine = TrendRiderEngine(TrendRiderConfig(), provider, provider, provider)
+    signal = SignalEvent(
+        ticker="TEST",
+        signal_type=SignalType.BUY_ENTRY,
+        date=datetime(2024, 1, 1),
+        close_price=100.0,
+        ema21=100.0,
+        timeframe="daily",
+    )
+
+    execution_price = engine._execution_price_for_signal(signal)
+    engine._add_execution_metadata(signal, execution_price)
+    trade = engine.trade_manager.process_signal(signal, execution_price)
+
+    assert trade is not None
+    assert trade.entry_price == pytest.approx(100.05)
+    assert signal.metadata["execution_base_price"] == pytest.approx(100.0)
+    assert signal.metadata["execution_price"] == pytest.approx(100.05)
+
+
+def test_daily_buy_entry_caps_breakout_fill_at_upper_band(tmp_path):
+    db_path = tmp_path / "trend_rider.sqlite"
+    provider = SQLiteProvider(str(db_path))
+    engine = TrendRiderEngine(TrendRiderConfig(), provider, provider, provider)
+    signal = SignalEvent(
+        ticker="TEST",
+        signal_type=SignalType.BUY_ENTRY,
+        date=datetime(2024, 1, 1),
+        close_price=110.0,
+        ema21=100.0,
+        timeframe="daily",
+    )
+
+    execution_price = engine._execution_price_for_signal(signal)
+    trade = engine.trade_manager.process_signal(signal, execution_price)
+
+    assert trade is not None
+    assert trade.entry_price == pytest.approx(105.0525)

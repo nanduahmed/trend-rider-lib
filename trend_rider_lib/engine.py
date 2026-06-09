@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .core.config import TrendRiderConfig
 from .core.models import StockContext, SignalEvent, TradeRecord, TrendEventRecord
-from .core.enums import Classification
+from .core.enums import Classification, SignalType
 
 from .indicators.resampler import resample_daily_to_weekly
 from .indicators.ema_engine import enrich_with_indicators, incremental_ema
@@ -28,6 +28,8 @@ from .persistence.interfaces import IStateStore, ISignalStore, ITradeStore
 
 
 logger = logging.getLogger(__name__)
+
+DAILY_ENTRY_SIGNAL_TYPES = {SignalType.BUY_ENTRY, SignalType.MOMENTUM_ENTRY}
 
 
 class TrendRiderEngine:
@@ -298,8 +300,10 @@ class TrendRiderEngine:
 
         def signal_callback(signal: SignalEvent):
             emitted_signals.append(signal)
+            execution_price = self._execution_price_for_signal(signal)
+            self._add_execution_metadata(signal, execution_price)
             self.signal_engine.process_signal(signal)
-            trade = self.trade_manager.process_signal(signal, signal.close_price)
+            trade = self.trade_manager.process_signal(signal, execution_price)
             if trade:
                 self.trade_store.save_trade(trade)
 
@@ -434,6 +438,46 @@ class TrendRiderEngine:
             "Signal Metadata": json.dumps(signal_metadata, default=str) if signal_metadata else "",
         }
 
+    def _execution_price_for_signal(self, signal: SignalEvent) -> Optional[float]:
+        """Return the simulated fill price for a signal."""
+        if signal.close_price is None:
+            return None
+
+        if (
+            signal.signal_type in DAILY_ENTRY_SIGNAL_TYPES
+            and signal.timeframe == "daily"
+        ):
+            base_price = signal.close_price
+            if signal.ema21 is not None:
+                upper_bound = signal.ema21 * (1 + self.config.buy_zone_upper_pct)
+                base_price = min(upper_bound, signal.close_price)
+            return base_price * (1 + self.config.trade_slippage_pct)
+
+        return signal.close_price
+
+    def _add_execution_metadata(
+        self,
+        signal: SignalEvent,
+        execution_price: Optional[float],
+    ) -> None:
+        """Attach entry execution details before signal persistence."""
+        if (
+            signal.signal_type not in DAILY_ENTRY_SIGNAL_TYPES
+            or signal.timeframe != "daily"
+            or signal.close_price is None
+            or execution_price is None
+        ):
+            return
+
+        signal.metadata.update(
+            {
+                "raw_close": signal.close_price,
+                "execution_base_price": execution_price / (1 + self.config.trade_slippage_pct),
+                "slippage_pct": self.config.trade_slippage_pct,
+                "execution_price": execution_price,
+            }
+        )
+
     def _restore_fsm(self, ticker: str, context: StockContext) -> StockFSM:
         """
         Restore FSM from saved context.
@@ -446,8 +490,10 @@ class TrendRiderEngine:
             Restored StockFSM
         """
         def signal_callback(signal: SignalEvent):
+            execution_price = self._execution_price_for_signal(signal)
+            self._add_execution_metadata(signal, execution_price)
             self.signal_engine.process_signal(signal)
-            trade = self.trade_manager.process_signal(signal, signal.close_price)
+            trade = self.trade_manager.process_signal(signal, execution_price)
             if trade:
                 self.trade_store.save_trade(trade)
 

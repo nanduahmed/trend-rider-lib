@@ -16,10 +16,15 @@ from trend_rider_lib.indicators.ema_engine import incremental_ema
 class TestFlagComputer:
     """Test zone flag calculations."""
 
-    def create_df_with_ema21(self, prices: list, ema21_values: list) -> pd.DataFrame:
+    def create_df_with_ema21(self, prices: list, ema21_values: list, opens: list = None) -> pd.DataFrame:
         """Create test DataFrame with prices and EMA21."""
         dates = [datetime(2023, 1, 1) + timedelta(weeks=i) for i in range(len(prices))]
+        if opens is None:
+            opens = [price * 0.99 for price in prices]
         df = pd.DataFrame({
+            'Open': opens,
+            'High': [max(open_, price) * 1.01 for open_, price in zip(opens, prices)],
+            'Low': [min(open_, price) * 0.99 for open_, price in zip(opens, prices)],
             'Close': prices,
             'EMA21': ema21_values,
             'timeframe': ['weekly'] * len(prices)
@@ -27,7 +32,7 @@ class TestFlagComputer:
         return df
 
     def test_buyzone_flag_true_when_in_range(self):
-        """Flag should be True when price in buy zone."""
+        """Flag should be True when a green candle closes above EMA21."""
         df = self.create_df_with_ema21(
             prices=[102.0],  # Between 100 and 105
             ema21_values=[100.0]
@@ -38,11 +43,37 @@ class TestFlagComputer:
         assert result.loc[result.index[0], 'is_buyzone'] == True
         assert result.loc[result.index[0], 'is_above_buyzone'] == False
 
+    def test_buyzone_flag_true_when_breakout_close_is_above_upper_band(self):
+        """A green candle may close above the upper band if it opened below it."""
+        df = self.create_df_with_ema21(
+            prices=[110.0],
+            ema21_values=[100.0],
+            opens=[104.0]
+        )
+
+        result = compute_zone_flags(df, buy_zone_upper_pct=0.05)
+
+        assert result.loc[result.index[0], 'is_buyzone'] == True
+        assert result.loc[result.index[0], 'is_above_buyzone'] == True
+
+    def test_buyzone_flag_false_for_red_candle(self):
+        """A red candle does not qualify even when it is above EMA21."""
+        df = self.create_df_with_ema21(
+            prices=[103.0],
+            ema21_values=[100.0],
+            opens=[104.0]
+        )
+
+        result = compute_zone_flags(df, buy_zone_upper_pct=0.05)
+
+        assert result.loc[result.index[0], 'is_buyzone'] == False
+
     def test_above_buyzone_flag_true_when_above_upper(self):
         """Flag should be True when price above upper bound."""
         df = self.create_df_with_ema21(
-            prices=[106.0],  # Above 105
-            ema21_values=[100.0]
+            prices=[107.0],  # Above 105
+            ema21_values=[100.0],
+            opens=[106.0]
         )
 
         result = compute_zone_flags(df, buy_zone_upper_pct=0.05)
@@ -64,6 +95,9 @@ class TestFlagComputer:
     def test_no_flags_on_nan_ema(self):
         """Flags should be False when EMA21 is NaN."""
         df = pd.DataFrame({
+            'Open': [99.0],
+            'High': [101.0],
+            'Low': [98.0],
             'Close': [100.0],
             'EMA21': [np.nan],
             'timeframe': ['weekly']
@@ -79,8 +113,9 @@ class TestFlagComputer:
         """Should handle multiple rows correctly."""
         prices = [100, 102, 106, 89, 98]
         ema21_values = [100, 100, 100, 100, 100]
+        opens = [99, 101, 100, 90, 97]
 
-        df = self.create_df_with_ema21(prices, ema21_values)
+        df = self.create_df_with_ema21(prices, ema21_values, opens)
         result = compute_zone_flags(df, buy_zone_upper_pct=0.05, downtrend_trigger_pct=0.10)
 
         # Row 0: 100, EMA21 100 → not in buyzone (need > EMA21)
@@ -90,6 +125,7 @@ class TestFlagComputer:
         assert result.iloc[1]['is_buyzone'] == True
 
         # Row 2: 106, EMA21 100 → above buyzone (106 > 105)
+        assert result.iloc[2]['is_buyzone'] == True
         assert result.iloc[2]['is_above_buyzone'] == True
 
         # Row 3: 89, EMA21 100 → downtrend trigger (89 < 90)

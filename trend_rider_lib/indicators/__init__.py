@@ -9,7 +9,7 @@ from .ema_engine import (
     incremental_ema,
     enrich_with_indicators,
 )
-from .flag_computer import compute_zone_flags, mark_warmup_complete
+from .flag_computer import candle_intersects_buy_zone, compute_zone_flags, mark_warmup_complete
 
 __all__ = [
     "resample_daily_to_weekly",
@@ -19,5 +19,6 @@ __all__ = [
     "incremental_ema",
     "enrich_with_indicators",
     "compute_zone_flags",
+    "candle_intersects_buy_zone",
     "mark_warmup_complete",
 ]

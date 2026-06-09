@@ -5,6 +5,21 @@ import pandas as pd
 import numpy as np
 
 
+def candle_intersects_buy_zone(
+    open_price: float,
+    close: float,
+    ema21: float,
+    buy_zone_upper_pct: float = 0.05
+) -> bool:
+    """Return True when a green candle qualifies against the EMA21 buy zone."""
+    values = [open_price, close, ema21]
+    if any(pd.isna(value) for value in values):
+        return False
+
+    upper_bound = ema21 * (1 + buy_zone_upper_pct)
+    return close > open_price and close > ema21 and open_price <= upper_bound
+
+
 def compute_zone_flags(
     df: pd.DataFrame,
     buy_zone_upper_pct: float = 0.05,
@@ -14,12 +29,12 @@ def compute_zone_flags(
     Vectorized computation of zone flags.
 
     Adds columns:
-    - is_buyzone: True if price in buy zone (EMA21 < close <= EMA21 * 1.05)
+    - is_buyzone: True if green candle opens below/inside upper band and closes above EMA21
     - is_above_buyzone: True if price above buy zone (close > EMA21 * 1.05)
     - is_downtrend_trigger: True if downtrend triggered (close < EMA21 * 0.90)
 
     Args:
-        df: DataFrame with Close and EMA21 columns
+        df: DataFrame with Open, Close, and EMA21 columns
         buy_zone_upper_pct: Upper bound of buy zone as fraction above EMA21
         downtrend_trigger_pct: Downtrend trigger as fraction below EMA21
 
@@ -39,10 +54,13 @@ def compute_zone_flags(
     if has_ema.any():
         ema21 = df.loc[has_ema, 'EMA21']
         close = df.loc[has_ema, 'Close']
+        open_price = df.loc[has_ema, 'Open']
 
-        # Buy zone: EMA21 < close <= EMA21 * (1 + buy_zone_upper_pct)
+        # Buy zone: green candle opens below/inside upper band and closes above EMA21.
         buy_zone_upper = ema21 * (1 + buy_zone_upper_pct)
-        df.loc[has_ema, 'is_buyzone'] = (close > ema21) & (close <= buy_zone_upper)
+        is_green = close > open_price
+        qualifies_buy_zone = (close > ema21) & (open_price <= buy_zone_upper)
+        df.loc[has_ema, 'is_buyzone'] = is_green & qualifies_buy_zone
 
         # Above buy zone: close > EMA21 * (1 + buy_zone_upper_pct)
         df.loc[has_ema, 'is_above_buyzone'] = close > buy_zone_upper

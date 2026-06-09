@@ -4,6 +4,9 @@ Configuration models for Trend Rider library.
 from pydantic import BaseModel, Field
 
 
+DEFAULT_SLIPPAGE = 0.0005
+
+
 class TrendRiderConfig(BaseModel):
     """Configuration parameters for Trend Rider analysis system."""
 
@@ -55,6 +58,12 @@ class TrendRiderConfig(BaseModel):
         default=1,
         ge=1,
         description="Maximum concurrent trades per stock"
+    )
+    trade_slippage_pct: float = Field(
+        default=DEFAULT_SLIPPAGE,
+        ge=0,
+        le=1,
+        description="Entry slippage applied to daily market-on-close fills (0.05% = 0.0005)"
     )
 
     # Uptrend Strength Thresholds

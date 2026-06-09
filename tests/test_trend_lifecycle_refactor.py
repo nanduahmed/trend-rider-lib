@@ -214,6 +214,44 @@ def test_buy_signal_gated_by_qualification_and_duplicate_crosses():
     assert len(buy_signals) == 1
 
 
+def test_buy_signal_allows_green_breakout_that_opened_inside_upper_band():
+    config = TrendRiderConfig()
+    fsm = StockFSM("TEST", config)
+    signals: list[SignalEvent] = []
+    fsm.signal_callback = signals.append
+    fsm.context.tr_qualified = True
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.last_ema21 = 100.0
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 100.0
+    fsm.machine.set_state(State.UPTREND.name, model=fsm)
+
+    breakout_cross = daily_row("2024-01-02", 104.0, 110.0, 103.0, 110.0, 101.0, 100.0)
+    fsm.process_daily_candle(breakout_cross)
+
+    buy_signals = [signal for signal in signals if signal.signal_type == SignalType.BUY_ENTRY]
+    assert len(buy_signals) == 1
+    assert buy_signals[0].close_price == 110.0
+
+
+def test_buy_signal_rejects_red_candle_even_when_open_is_inside_upper_band():
+    config = TrendRiderConfig()
+    fsm = StockFSM("TEST", config)
+    signals: list[SignalEvent] = []
+    fsm.signal_callback = signals.append
+    fsm.context.tr_qualified = True
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.last_ema21 = 100.0
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 100.0
+    fsm.machine.set_state(State.UPTREND.name, model=fsm)
+
+    red_cross = daily_row("2024-01-02", 104.0, 105.0, 101.0, 103.0, 101.0, 100.0)
+    fsm.process_daily_candle(red_cross)
+
+    assert not any(signal.signal_type == SignalType.BUY_ENTRY for signal in signals)
+
+
 def test_active_uptrend_strength_updates_with_weekly_stats():
     fsm = StockFSM("TEST", TrendRiderConfig())
     fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))

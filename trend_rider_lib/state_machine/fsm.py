@@ -9,6 +9,7 @@ import pandas as pd
 
 from ..core.config import TrendRiderConfig
 from ..core.enums import SignalType, State, TrendEventType
+from ..indicators.flag_computer import candle_intersects_buy_zone
 from ..core.models import SignalEvent, StockContext, TrendEventRecord, UptrendRecord
 from .trend_metrics import record_daily_point, record_weekly_point, update_trend_metrics
 
@@ -153,10 +154,12 @@ class StockFSM:
             self.context.is_buyzone = False
             return
 
-        close = self.context.last_close
-        ema21 = self.context.last_ema21
-        upper_bound = ema21 * (1 + self.config.buy_zone_upper_pct)
-        self.context.is_buyzone = ema21 < close <= upper_bound
+        self.context.is_buyzone = candle_intersects_buy_zone(
+            row.get("Open"),
+            self.context.last_close,
+            self.context.last_ema21,
+            self.config.buy_zone_upper_pct,
+        )
 
     def _is_bullish_ema_cross(
         self,
@@ -381,6 +384,9 @@ class StockFSM:
             return
 
         if self.context.current_uptrend is None:
+            return
+
+        if not self.is_in_buyzone():
             return
 
         signal_type = SignalType.MOMENTUM_ENTRY if self.state == State.RECOVERING.name else SignalType.BUY_ENTRY
