@@ -1,7 +1,7 @@
 //@version=6
 // Financial Nerve – Trend Rider Indicator
 // Design Reference: trend_rider_lib/design.md
-indicator("Trend Rider", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
+indicator("Trend Rider v0.8110", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
 
 // =============================================================================
 // INPUTS
@@ -183,6 +183,9 @@ var float trendHigh = na
 var float trendLow = na
 var string currentClassification = "UNQUALIFIED"
 var label currentTrendLabel = na
+var bool activeBuyZone = false
+
+activeBuyZone := state == STATE_UPTREND and tr_qualified and inBuyZone
 
 // evidence + analytics
 var int firstBuyZoneTime = na
@@ -246,7 +249,7 @@ buyZoneLowerPlot = plot(showBuyZone ? buyZoneBottom : na, "Buy Zone Lower (Suppo
 
 fill(buyZoneUpperPlot, buyZoneMidPlot, color=showBuyZone ? buyZoneColor : na, title="Buy Zone Fill")
 fill(buyZoneLowerPlot, buyZoneMidPlot, color=showBuyZone ? buyZoneExitColor : na, title="Exit Zone Fill")
-bgcolor(showBuyZone and inBuyZone ? color.new(buyZoneColor, 90) : na, title="Active Buy Zone Background")
+bgcolor(showBuyZone and activeBuyZone ? color.new(buyZoneColor, 90) : na, title="Active Buy Zone Background")
 
 // =============================================================================
 // DAILY EVIDENCE / SIGNAL PREP

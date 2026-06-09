@@ -8,7 +8,7 @@
 // One open trade at a time (Trade Manager gate).
 // =============================================================================
 strategy(
-     title                = "Trend Rider Strategy",
+     title                = "Trend Rider Strategy v0.8110",
      shorttitle           = "TR-STR",
      overlay              = true,
      max_labels_count     = 500,
@@ -209,6 +209,9 @@ var int STATE_DOWNTREND  = 3
 var int STATE_RECOVERING = 4
 
 var int state = STATE_WARMUP
+var bool activeBuyZone = false
+
+activeBuyZone := state == STATE_UPTREND and tr_qualified and inBuyZone
 
 // Trend lifecycle
 var bool   tr_qualified     = false
@@ -299,7 +302,7 @@ buyZoneLowerPlot = plot(showBuyZone ? buyZoneBottom : na, "Buy Zone Lower",
 
 fill(buyZoneUpperPlot, buyZoneMidPlot,  color=showBuyZone ? buyZoneColor     : na, title="Buy Zone Fill")
 fill(buyZoneLowerPlot, buyZoneMidPlot,  color=showBuyZone ? buyZoneExitColor : na, title="Exit Zone Fill")
-bgcolor(showBuyZone and inBuyZone ? color.new(buyZoneColor, 90) : na,
+bgcolor(showBuyZone and activeBuyZone ? color.new(buyZoneColor, 90) : na,
      title="Active Buy Zone Background")
 
 // TSL line plot
