@@ -8,7 +8,7 @@
 // One open trade at a time (Trade Manager gate).
 // =============================================================================
 strategy(
-     title                = "Trend Rider Strategy v0.8110",
+     title                = "Trend Rider Strategy v0.8.113",
      shorttitle           = "TR-STR",
      overlay              = true,
      max_labels_count     = 500,
@@ -47,6 +47,7 @@ tm_targetPct = input.float(15.0, "Target %",          minval=0.1, step=0.5,  gro
 tm_slPct     = input.float(7.0,  "Stop Loss %",       minval=0.1, step=0.5,  group=tmGroup)
 tm_tslPct    = input.float(5.0,  "Trailing SL %",     minval=0.1, step=0.5,  group=tmGroup)
 tm_tslAct    = input.float(3.0,  "TSL Activation % (profit before TSL arms)", minval=0.0, step=0.5, group=tmGroup)
+tm_slippagePct = input.float(0.05, "Entry slippage %", minval=0.0, step=0.01, group=tmGroup)
 
 // ── Visibility ────────────────────────────────────────────────────────────────
 showWeeklyEma     = input.bool(true,  "Show weekly EMA",           group=visibilityGroup)
@@ -188,7 +189,7 @@ newDailyEma21Cross   = newDailyBar and dailyCrossCloseEma21
 pastWarmup           = weeklyBarIndex >= warmupWeeks
 aboveWeeklyEma       = weeklyClose > weeklyEma
 buyZoneGreenCandle   = weeklyClose > weeklyOpen
-inBuyZone            = aboveWeeklyEma and weeklyClose <= weeklyEma * buyZoneMax and buyZoneGreenCandle
+inBuyZone            = buyZoneGreenCandle and weeklyClose > weeklyEma and weeklyOpen <= weeklyEma * buyZoneMax
 inAboveBuyZone       = weeklyClose > weeklyEma * buyZoneMax
 trendBreak           = weeklyClose < weeklyEma * breakThreshold
 
@@ -197,7 +198,9 @@ buyZoneBottom = weeklyEma * breakThreshold
 
 // Daily buy-zone green-candle detection (runs on the current chart bar)
 dailyGreenCandle   = dailyClose > dailyOpen
-dailyInBuyZone     = dailyClose > weeklyEma and dailyClose <= weeklyEma * buyZoneMax and dailyGreenCandle
+chartGreenCandle   = close > open
+chartInBuyZone     = chartGreenCandle and close > weeklyEma and open <= weeklyEma * buyZoneMax
+dailyInBuyZone     = timeframe.isdaily ? chartInBuyZone : dailyGreenCandle and dailyClose > weeklyEma and dailyOpen <= weeklyEma * buyZoneMax
 
 // =============================================================================
 // FSM CONSTANTS / STATE
@@ -211,8 +214,6 @@ var int STATE_RECOVERING = 4
 var int state = STATE_WARMUP
 var bool activeBuyZone = false
 
-activeBuyZone := state == STATE_UPTREND and tr_qualified and inBuyZone
-
 // Trend lifecycle
 var bool   tr_qualified     = false
 var int    trendId          = 0
@@ -224,6 +225,8 @@ var float  trendHigh        = na
 var float  trendLow         = na
 var string currentClassification = "UNQUALIFIED"
 var label  currentTrendLabel     = na
+
+activeBuyZone := state == STATE_UPTREND and tr_qualified and (timeframe.isweekly ? inBuyZone : chartInBuyZone)
 
 // Evidence
 var int   firstBuyZoneTime             = na
@@ -503,11 +506,11 @@ if sigTrQualified and not qualifiedSignalEmitted
              label.style_label_up, startColor)
     tableNeedsRebuild := true
 
-if state == STATE_UPTREND and tr_qualified and newDailyFastSlowCross and not buySignalEmitted
+if state == STATE_UPTREND and tr_qualified and newDailyFastSlowCross and dailyInBuyZone and not buySignalEmitted
     buySignalEmitted  := true
     tableNeedsRebuild := true
 
-if state == STATE_RECOVERING and tr_qualified and newDailyFastSlowCross and not momentumSignalEmitted
+if state == STATE_RECOVERING and tr_qualified and newDailyFastSlowCross and dailyInBuyZone and not momentumSignalEmitted
     momentumSignalEmitted := true
     sigMomentumEntry      := true
     momentumEntryPendingLabel := true
@@ -573,13 +576,15 @@ _entrySignal = state == STATE_UPTREND
                  and not tm_inTrade           // one-trade gate
 
 if _entrySignal and barstate.isconfirmed
+    _executionBase     = math.min(weeklyEma * buyZoneMax, dailyClose)
+    _executionPrice    = _executionBase * (1.0 + tm_slippagePct / 100.0)
     tm_firstBuyZoneHit := true               // arm the latch
     tm_inTrade         := true
-    tm_entryPrice      := close
-    tm_targetPrice     := close * (1.0 + tm_targetPct / 100.0)
-    tm_slPrice         := close * (1.0 - tm_slPct     / 100.0)
-    tm_tslHighest      := close
-    tm_tslPrice        := close * (1.0 - tm_tslPct    / 100.0)
+    tm_entryPrice      := _executionPrice
+    tm_targetPrice     := _executionPrice * (1.0 + tm_targetPct / 100.0)
+    tm_slPrice         := _executionPrice * (1.0 - tm_slPct     / 100.0)
+    tm_tslHighest      := _executionPrice
+    tm_tslPrice        := _executionPrice * (1.0 - tm_tslPct    / 100.0)
     tm_tslArmed        := false
     tm_entryBar        := bar_index
 
@@ -593,7 +598,10 @@ if _entrySignal and barstate.isconfirmed
              color=color.rgb(0, 180, 80),
              textcolor=color.white,
              size=size.small,
-             tooltip="Entry: " + str.tostring(close, format.mintick) +
+             tooltip="Entry: " + str.tostring(tm_entryPrice, format.mintick) +
+                     "\nRaw Close: " + str.tostring(dailyClose, format.mintick) +
+                     "\nBase: " + str.tostring(_executionBase, format.mintick) +
+                     "\nSlippage: " + str.tostring(tm_slippagePct) + "%" +
                      "\nTarget: " + str.tostring(tm_targetPrice, format.mintick) +
                      "\nSL: "     + str.tostring(tm_slPrice,     format.mintick) +
                      "\nTSL %: "  + str.tostring(tm_tslPct)      + "%")
@@ -752,4 +760,4 @@ if barstate.islast and showTMTable
              bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
         table.cell(tmTable, 1, r + 1, array.get(_vals, r),
              bgcolor=tableBodyColor, text_color=tableTextColor, text_size=_sz)
-    
+             

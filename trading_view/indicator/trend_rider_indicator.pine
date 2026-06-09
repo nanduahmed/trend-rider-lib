@@ -1,7 +1,7 @@
 //@version=6
 // Financial Nerve – Trend Rider Indicator
 // Design Reference: trend_rider_lib/design.md
-indicator("Trend Rider v0.8110", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
+indicator("Trend Rider v0.8.113", shorttitle="TR", overlay=true, max_labels_count=500, max_boxes_count=120, max_lines_count=120)
 
 // =============================================================================
 // INPUTS
@@ -117,7 +117,7 @@ f_daily_context() =>
     _crossWithinWeek = not na(_barsSinceCross) and (na(_barsSinceWeek) or _barsSinceCross <= _barsSinceWeek)
     _crossTime = _crossWithinWeek ? ta.valuewhen(_crossFastSlow, time, 0) : int(na)
     _crossPrice = _crossWithinWeek ? ta.valuewhen(_crossFastSlow, close, 0) : na
-    [close, time, _ema21, _ema34, _ema55, _crossFastSlow, _crossCloseEma21, _crossWithinWeek, _crossTime, _crossPrice]
+    [close, time, open, _ema21, _ema34, _ema55, _crossFastSlow, _crossCloseEma21, _crossWithinWeek, _crossTime, _crossPrice]
 
 // =============================================================================
 // MTF DATA LAYER (isolated, non-repainting)
@@ -128,7 +128,7 @@ f_daily_context() =>
      [close, high, low, time_close, ta.ema(close, weeklyEmaLen), open, bar_index],
      barmerge.gaps_off, barmerge.lookahead_off)
 
-[dailyClose, dailyTime, dailyEma21, dailyEma34, dailyEma55, dailyCrossFastSlow, dailyCrossCloseEma21, dailyCrossFastSlowWithinWeek, dailyCrossFastSlowTime, dailyCrossFastSlowPrice] = request.security(
+[dailyClose, dailyTime, dailyOpen, dailyEma21, dailyEma34, dailyEma55, dailyCrossFastSlow, dailyCrossCloseEma21, dailyCrossFastSlowWithinWeek, dailyCrossFastSlowTime, dailyCrossFastSlowPrice] = request.security(
      syminfo.tickerid, "D",
      f_daily_context(),
      barmerge.gaps_off, barmerge.lookahead_off)
@@ -154,9 +154,13 @@ newDailyEma21Cross = newDailyBar and dailyCrossCloseEma21
 pastWarmup = weeklyBarIndex >= warmupWeeks
 aboveWeeklyEma = weeklyClose > weeklyEma
 buyZoneGreenCandle = weeklyClose > weeklyOpen
-inBuyZone = aboveWeeklyEma and weeklyClose <= weeklyEma * buyZoneMax and buyZoneGreenCandle
+inBuyZone = buyZoneGreenCandle and weeklyClose > weeklyEma and weeklyOpen <= weeklyEma * buyZoneMax
 inAboveBuyZone = weeklyClose > weeklyEma * buyZoneMax
 trendBreak = weeklyClose < weeklyEma * breakThreshold
+dailyGreenCandle = dailyClose > dailyOpen
+chartGreenCandle = close > open
+chartInBuyZone = chartGreenCandle and close > weeklyEma and open <= weeklyEma * buyZoneMax
+dailyInBuyZone = timeframe.isdaily ? chartInBuyZone : dailyGreenCandle and dailyClose > weeklyEma and dailyOpen <= weeklyEma * buyZoneMax
 
 buyZoneTop = weeklyEma * buyZoneMax
 buyZoneBottom = weeklyEma * breakThreshold
@@ -185,7 +189,7 @@ var string currentClassification = "UNQUALIFIED"
 var label currentTrendLabel = na
 var bool activeBuyZone = false
 
-activeBuyZone := state == STATE_UPTREND and tr_qualified and inBuyZone
+activeBuyZone := state == STATE_UPTREND and tr_qualified and (timeframe.isweekly ? inBuyZone : chartInBuyZone)
 
 // evidence + analytics
 var int firstBuyZoneTime = na
@@ -422,11 +426,11 @@ if sigTrQualified and not qualifiedSignalEmitted
         f_draw_label(weeklyMarkerTime, weeklyLow, "TR QUALIFIED", "Trend reached qualification threshold", label.style_label_up, startColor)
     tableNeedsRebuild := true
 
-if state == STATE_UPTREND and tr_qualified and newDailyFastSlowCross and not buySignalEmitted
+if state == STATE_UPTREND and tr_qualified and newDailyFastSlowCross and dailyInBuyZone and not buySignalEmitted
     buySignalEmitted := true
     tableNeedsRebuild := true
 
-if state == STATE_RECOVERING and tr_qualified and newDailyFastSlowCross and not momentumSignalEmitted
+if state == STATE_RECOVERING and tr_qualified and newDailyFastSlowCross and dailyInBuyZone and not momentumSignalEmitted
     momentumSignalEmitted := true
     sigMomentumEntry := true
     momentumEntryPendingLabel := true
