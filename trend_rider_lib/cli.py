@@ -417,7 +417,7 @@ def show(
     filter_by: Optional[str] = typer.Option(
         None,
         "--filter",
-        help="Filter by classification: PRIME, PRIME_WAITLIST, MOMENTUM, MOMENTUM_WAITLIST, UNQUALIFIED",
+        help="Filter by classification: PRIME, PRIME_WAITLIST, MOMENTUM, MOMENTUM_WAITLIST, UNQUALIFIED, RECOVERING",
     ),
     state_filter: Optional[str] = typer.Option(
         None,

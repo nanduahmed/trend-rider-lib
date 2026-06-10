@@ -26,7 +26,7 @@ def classify_stock(context: StockContext) -> Classification:
         Classification enum value
     """
     if context.current_state == State.RECOVERING:
-        return Classification.UNQUALIFIED
+        return Classification.RECOVERING
 
     if not context.tr_qualified:
         return Classification.UNQUALIFIED

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from trend_rider_lib import (
+    Classification,
     SignalEvent,
     SignalType,
     State,
@@ -152,6 +153,42 @@ def test_trend_end_uses_weekly_close_and_excludes_ending_week():
     assert any(signal.signal_type == SignalType.DOWNTREND_START for signal in signals)
     assert any(event.event_type == TrendEventType.DAILY_DOWNTREND_TRIGGER for event in events)
     assert any(event.event_type == TrendEventType.WEEKLY_TREND_END for event in events)
+
+
+def test_recovering_classification_uses_recovering_label():
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    fsm.context.current_state = State.RECOVERING
+    fsm.machine.set_state(State.RECOVERING.name, model=fsm)
+
+    from trend_rider_lib.state_machine.classifier import classify_stock
+
+    assert classify_stock(fsm.context) == Classification.RECOVERING
+
+
+def test_recovering_bullish_crossover_resets_start_for_new_uptrend():
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    fsm.context.current_state = State.RECOVERING
+    fsm.machine.set_state(State.RECOVERING.name, model=fsm)
+    fsm.context.tr_qualified = True
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.current_uptrend.cycle_id = 1
+    fsm.context.current_uptrend.start_state = State.RECOVERING.name
+    fsm.context.last_ema21 = 100.0
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 100.0
+    fsm.context.last_close = 101.0
+    fsm.context.is_buyzone = True
+
+    fsm.process_daily_candle(
+        daily_row("2024-01-02", 100.0, 103.0, 99.5, 102.0, 101.0, 100.0)
+    )
+
+    assert fsm.state == State.UPTREND.name
+    assert fsm.context.current_uptrend is not None
+    assert fsm.context.current_uptrend.start_date == pd.Timestamp("2024-01-01")
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.buy_signal_emitted is True
 
 
 def test_recovering_blocks_buy_signals():
@@ -409,3 +446,220 @@ def test_normalized_persistence_round_trip(tmp_path):
     assert latest_signal.timeframe == "daily"
     assert latest_signal.state == "UPTREND"
     assert latest_signal.trend_cycle_id == 1
+
+
+def _setup_with_uptrend_and_downtrend(fsm: StockFSM) -> None:
+    """Run warmup then simulate an uptrend followed by downtrend trigger.
+    Leaves FSM in DOWNTREND state with the ended uptrend in history."""
+    config = TrendRiderConfig()
+    # Push through warmup by sending 25 weekly candles with close BELOW EMA21
+    # to avoid triggering an uptrend during warmup.
+    base_date = pd.Timestamp("2023-01-06")
+    for i in range(25):
+        date = base_date + pd.Timedelta(weeks=i)
+        fsm.process_weekly_candle(
+            weekly_row(date.strftime("%Y-%m-%d"), 99.0, 101.0, 98.0, 99.0, 100.0)
+        )
+    assert fsm.state == State.OBSERVING.name
+
+    # Uptrend week 1: close > EMA21
+    date = base_date + pd.Timedelta(weeks=25)
+    fsm.process_weekly_candle(
+        weekly_row(date.strftime("%Y-%m-%d"), 101.0, 104.0, 100.0, 103.0, 100.0)
+    )
+
+    # Uptrend week 2: continues
+    date = base_date + pd.Timedelta(weeks=26)
+    fsm.process_weekly_candle(
+        weekly_row(date.strftime("%Y-%m-%d"), 102.0, 105.0, 101.0, 104.0, 100.0)
+    )
+
+    # Downtrend trigger week: close < 90
+    date = base_date + pd.Timedelta(weeks=27)
+    fsm.process_weekly_candle(
+        weekly_row(date.strftime("%Y-%m-%d"), 88.0, 89.0, 85.0, 87.0, 100.0)
+    )
+    assert fsm.state == State.DOWNTREND.name
+    assert fsm.context.current_uptrend is None
+    assert len(fsm.context.uptrend_history) == 1
+
+
+def test_recovering_weeks_not_counted_in_uptrend_analytics():
+    """
+    Weekly candles processed during RECOVERING must NOT be counted in
+    uptrend_weeks, closes_above_ema, closes_below_ema, or pct_closes_above.
+    Only weeks AFTER the bullish crossover confirmation should count.
+    """
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    _setup_with_uptrend_and_downtrend(fsm)
+
+    # RECOVERING Week A: close > EMA21 (but only starts trend if current_uptrend is None)
+    # Since we're in DOWNTREND with no current_uptrend, this should work
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-02", 101.0, 104.0, 100.0, 103.0, 100.0)
+    )
+    assert fsm.state == State.RECOVERING.name
+    assert fsm.context.uptrend_weeks == 0
+
+    # RECOVERING Week B: should NOT count
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-09", 102.0, 105.0, 101.0, 104.0, 100.0)
+    )
+    assert fsm.state == State.RECOVERING.name
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.closes_below_ema == 0
+
+    # RECOVERING Week C: should NOT count
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-16", 103.0, 106.0, 102.0, 105.0, 100.0)
+    )
+    assert fsm.state == State.RECOVERING.name
+    assert fsm.context.uptrend_weeks == 0
+
+    # Now bullish crossover happens (daily), confirming the recovery
+    # Set previous EMAs so the crossover is detected
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 101.0
+    fsm.context.tr_qualified = True
+    fsm.context.is_buyzone = True
+    signals: list = []
+    fsm.signal_callback = signals.append
+    fsm.process_daily_candle(
+        daily_row("2024-02-19", 103.0, 106.0, 102.0, 105.0, 102.0, 101.0)
+    )
+    assert fsm.state == State.UPTREND.name
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.closes_below_ema == 0
+
+    # Week D: now counted (first week after crossover)
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-23", 104.0, 107.0, 103.0, 106.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 1
+    assert fsm.context.closes_above_ema == 1
+    assert fsm.context.closes_below_ema == 0
+
+    # Week E: counted
+    fsm.process_weekly_candle(
+        weekly_row("2024-03-01", 103.0, 104.0, 100.0, 101.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 2
+    assert fsm.context.closes_above_ema == 2
+    assert fsm.context.closes_below_ema == 0
+
+
+def test_recovering_bullish_crossover_transitions_to_uptrend_without_tr_qualified():
+    """
+    A bullish crossover during RECOVERING must transition to UPTREND and
+    reset analytics even when tr_qualified is False. Buy signals remain
+    gated but the state transition and analytics reset must occur.
+    """
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    _setup_with_uptrend_and_downtrend(fsm)
+
+    # Enter RECOVERING
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-02", 101.0, 104.0, 100.0, 103.0, 100.0)
+    )
+    assert fsm.state == State.RECOVERING.name
+
+    # Some weeks pass in RECOVERING (not counted)
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-09", 102.0, 105.0, 101.0, 104.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 0
+
+    # Bullish crossover WITHOUT tr_qualified
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 102.0
+    fsm.context.is_buyzone = True
+    signals: list = []
+    fsm.signal_callback = signals.append
+    fsm.process_daily_candle(
+        daily_row("2024-02-12", 103.0, 106.0, 102.0, 105.0, 102.0, 101.0)
+    )
+    # MUST transition to UPTREND even without tr_qualified
+    assert fsm.state == State.UPTREND.name
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.closes_below_ema == 0
+
+    # No buy signal should have been emitted since tr_qualified=False
+    buy_entry_signals = [s for s in signals if s.signal_type in {SignalType.BUY_ENTRY, SignalType.MOMENTUM_ENTRY}]
+    assert len(buy_entry_signals) == 0
+
+
+def test_full_recovery_lifecycle_analytics():
+    """
+    Simulate a full lifecycle: UPTREND → DOWNTREND → RECOVERING (several weeks)
+    → bullish crossover confirms uptrend → uptrend weeks counted correctly.
+    This tests the exact scenario reported in the TIINDIA.NS bug.
+    """
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    _setup_with_uptrend_and_downtrend(fsm)
+
+    # RECOVERING weeks: close above EMA21 after downtrend
+    # These MUST NOT count towards uptrend analytics
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-02", 101.0, 105.0, 100.0, 103.0, 100.0)
+    )
+    assert fsm.state == State.RECOVERING.name
+
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-09", 102.0, 106.0, 101.0, 104.0, 100.0)
+    )
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-16", 103.0, 107.0, 102.0, 105.0, 100.0)
+    )
+    fsm.process_weekly_candle(
+        weekly_row("2024-02-23", 104.0, 108.0, 103.0, 106.0, 100.0)
+    )
+
+    # All RECOVERING weeks should NOT be counted
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.closes_below_ema == 0
+
+    # Bullish crossover confirms recovery (MOMENTUM_ENTRY when tr_qualified)
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 103.0
+    fsm.context.tr_qualified = True
+    fsm.context.is_buyzone = True
+    fsm.process_daily_candle(
+        daily_row("2024-02-26", 105.0, 109.0, 104.0, 108.0, 103.0, 102.0)
+    )
+    assert fsm.state == State.UPTREND.name
+    # Analytics should be reset to 0
+    assert fsm.context.uptrend_weeks == 0
+    assert fsm.context.closes_above_ema == 0
+    assert fsm.context.closes_below_ema == 0
+
+    # Now uptrend weeks should count properly (not including recovery weeks)
+    fsm.process_weekly_candle(
+        weekly_row("2024-03-01", 106.0, 110.0, 105.0, 109.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 1
+    assert fsm.context.closes_above_ema == 1
+
+    fsm.process_weekly_candle(
+        weekly_row("2024-03-08", 107.0, 111.0, 106.0, 110.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 2
+    assert fsm.context.closes_above_ema == 2
+
+    fsm.process_weekly_candle(
+        weekly_row("2024-03-15", 106.0, 108.0, 99.0, 99.0, 100.0)
+    )
+    assert fsm.context.uptrend_weeks == 3
+    assert fsm.context.closes_above_ema == 2
+    assert fsm.context.closes_below_ema == 1
+
+    # Verify final analytics
+    assert fsm.context.current_uptrend is not None
+    assert fsm.context.current_uptrend.num_weeks == 3
+    assert fsm.context.current_uptrend.closes_above_ema == 2
+    assert fsm.context.current_uptrend.pct_closes_above == pytest.approx(2/3)
+    # Should be DEVELOPING (pct ~ 0.667, which is < 0.70 threshold)
+    assert fsm.context.current_uptrend.strength == UptrendStrength.WEAK

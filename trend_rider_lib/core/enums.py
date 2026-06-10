@@ -22,6 +22,7 @@ class Classification(Enum):
     PRIME_WAITLIST = auto()
     MOMENTUM = auto()
     MOMENTUM_WAITLIST = auto()
+    RECOVERING = auto()
 
 
 class SignalType(Enum):

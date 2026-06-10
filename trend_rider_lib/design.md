@@ -34,6 +34,8 @@ Downtrend Trigger:
 * Weekly close above EMA21 is the official uptrend start boundary
 * Weekly close below `0.90 × EMA21` is the official downtrend end boundary
 * The confirmation week is excluded from `#weeks`, strength, duration, and performance counts
+* The exact week the trend starts after a recovery crossover is also excluded from the weekly statistics until the next weekly candle is processed
+* The exact week the downtrend trigger fires is excluded from the ending cycle statistics
 
 ---
 
@@ -77,7 +79,8 @@ stateDiagram-v2
 
 * Weekly confirmation creates the official trend start date
 * Daily EMA21 crosses are recorded as evidence, not as official boundaries
-* `RECOVERING` counts as an uptrend for analytics, but it blocks buy signals until the first valid post-recovery bullish crossover and qualification rules pass
+* `RECOVERING` is a recovery phase, not an analytics-counted uptrend phase; it blocks buy signals until the first valid post-recovery bullish crossover and qualification rules pass
+* The recovery week is the weekly candle that first moves back above EMA21; the first bullish crossover (EMA34 > EMA55) confirms the recovered uptrend, and analytics for that cycle begin from the weekly recovery anchor instead of counting the recovery week itself
 * Buy signals are gated by `tr_qualified == True`
 * `tr_qualified` is a one-way latch and never resets
 
@@ -121,7 +124,7 @@ Strength thresholds:
 
 ## 5. Classification
 
-* `RECOVERING` is shown as `UNQUALIFIED`
+* `RECOVERING` is shown as `RECOVERING`
 * `tr_qualified == False` -> `UNQUALIFIED`
 * `tr_qualified == True` and `uptrend_weeks >= 40` -> `PRIME` or `PRIME_WAITLIST`
 * `tr_qualified == True` and `uptrend_weeks < 40` -> `MOMENTUM` or `MOMENTUM_WAITLIST`
@@ -218,6 +221,17 @@ Every signal stores:
 * Duplicate buy emission is blocked on the same crossover
 * ROC, max profit, ATH, and distance-from-ATH are calculated from the first official buy zone
 * Persistence round-trips the new queryable tables cleanly
+
+### Simple example
+
+If a stock falls below EMA21 and then closes above EMA21 on week W, that week is marked `RECOVERING`. The next valid daily bullish crossover (EMA34 > EMA55) confirms the recovered cycle, and the weekly recovery week stays as the official anchor for that cycle. The weekly statistics for the recovered cycle begin from that anchor week onward, and the week that triggered the downtrend is not included in the final cycle counts.
+
+Example:
+
+* Week A: price closes below EMA21 -> downtrend week
+* Week B: price closes above EMA21 -> `RECOVERING` week
+* Day C inside Week B: EMA34 > EMA55 -> new uptrend start
+* Week C onward: `Weeks`, `% Above EMA`, and strength are calculated from the post-start period only
 
 ---
 

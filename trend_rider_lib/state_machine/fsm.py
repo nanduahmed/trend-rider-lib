@@ -8,7 +8,7 @@ from typing import Callable, Optional
 import pandas as pd
 
 from ..core.config import TrendRiderConfig
-from ..core.enums import SignalType, State, TrendEventType
+from ..core.enums import Classification, SignalType, State, TrendEventType
 from ..indicators.flag_computer import candle_intersects_buy_zone
 from ..core.models import SignalEvent, StockContext, TrendEventRecord, UptrendRecord
 from .trend_metrics import record_daily_point, record_weekly_point, update_trend_metrics
@@ -36,6 +36,7 @@ class StockFSM:
         self.ticker = ticker
         self.config = config
         self.context = StockContext(ticker=ticker)
+        self.context.classification = Classification.UNQUALIFIED
         self.signal_callback = signal_callback
         self.event_callback = event_callback
         self._current_row: Optional[pd.Series] = None
@@ -82,7 +83,12 @@ class StockFSM:
             # Active trend continuation.
             if self.context.current_uptrend and self.context.current_uptrend.start_date is not None:
                 if row.name > self.context.current_uptrend.start_date:
-                    self._update_active_trend_weekly(row)
+                    # Do NOT count weekly analytics during RECOVERING. The recovery
+                    # phase is not an analytics-counted uptrend period and must be
+                    # excluded from week count, % above EMA, and strength until
+                    # the bullish crossover confirms the recovered trend.
+                    if self.state != State.RECOVERING.name:
+                        self._update_active_trend_weekly(row)
 
                 # Buy zone / above zone state tracking remains visible even when
                 # buy signals are not yet eligible.
@@ -377,6 +383,41 @@ class StockFSM:
         )
         self.emit_signal(SignalType.EMA_CROSSOVER, row)
 
+        # Capture the current state before any transitions, so we can
+        # correctly determine the signal type even after a RECOVERING → UPTREND
+        # transition below.
+        was_recovering = self.state == State.RECOVERING.name
+
+        # RECOVERING → UPTREND state transition must happen regardless of
+        # tr_qualified. The bullish crossover confirms the recovered trend
+        # and resets analytics so recovery weeks are excluded from counts.
+        # Buy signals remain gated by tr_qualified below.
+        if was_recovering:
+            anchor_date = (
+                self.context.current_uptrend.start_date
+                if self.context.current_uptrend is not None and self.context.current_uptrend.start_date is not None
+                else row.name
+            )
+            self.context.trend_start_date = anchor_date
+            self.context.uptrend_start_date = anchor_date
+            self.context.uptrend_weeks = 0
+            self.context.closes_above_ema = 0
+            self.context.closes_below_ema = 0
+            if self.context.current_uptrend is not None:
+                if self.context.current_uptrend.start_date is None:
+                    self.context.current_uptrend.start_date = row.name
+                self.context.current_uptrend.num_weeks = 0
+                self.context.current_uptrend.closes_above_ema = 0
+                self.context.current_uptrend.closes_below_ema = 0
+                self.context.current_uptrend.pct_closes_above = 0.0
+                self.context.current_uptrend.strength = None
+                self.context.current_uptrend.first_buy_zone_date = None
+                self.context.current_uptrend.first_buy_zone_price = None
+            self._set_state(State.UPTREND)
+
+        # Buy signal emission requires tr_qualified, buy zone, and no
+        # duplicate emission — but the state transition above already
+        # handled the RECOVERING case.
         if not self.context.tr_qualified:
             return
 
@@ -389,19 +430,21 @@ class StockFSM:
         if not self.is_in_buyzone():
             return
 
-        signal_type = SignalType.MOMENTUM_ENTRY if self.state == State.RECOVERING.name else SignalType.BUY_ENTRY
+        signal_type = SignalType.MOMENTUM_ENTRY if was_recovering else SignalType.BUY_ENTRY
         self.emit_signal(signal_type, row)
         self.context.buy_signal_emitted = True
         self.context.last_buy_signal_date = row.name
         self.context.last_buy_signal_type = signal_type
         self.context.last_buy_signal_crossover_date = row.name
 
-        if self.state == State.RECOVERING.name:
-            self._set_state(State.UPTREND)
-        elif self.is_in_buyzone():
-            self._set_state(State.BUY_ZONE)
-        else:
-            self._set_state(State.ABOVE_BUY_ZONE)
+        # Do NOT transition again if we were RECOVERING — the recovery
+        # transition block above already handled the state (UPTREND) and
+        # analytics reset.
+        if not was_recovering:
+            if self.is_in_buyzone():
+                self._set_state(State.BUY_ZONE)
+            else:
+                self._set_state(State.ABOVE_BUY_ZONE)
 
     def _reset_bullish_crossover_latch(self) -> None:
         self.context.is_crossover_detected = False
