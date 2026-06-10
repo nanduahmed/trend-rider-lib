@@ -31,7 +31,9 @@ from .indicators import (
 from .state_machine import StockFSM, classify_stock, update_classification
 from .trading import TradeManager, TSLEngine
 from .persistence import SQLiteProvider, IStateStore, ISignalStore, ITradeStore
+from .persistence.scan_handler import IScanResultHandler, BridgeProvider
 from .downloader import YFinanceDownloader
+from .api import scan_stocks
 
 __version__ = "0.81"
 
@@ -69,6 +71,11 @@ __all__ = [
     "IStateStore",
     "ISignalStore",
     "ITradeStore",
+    # Handler / Bridge
+    "IScanResultHandler",
+    "BridgeProvider",
+    # Public API
+    "scan_stocks",
     # Downloader
     "YFinanceDownloader",
 ]
