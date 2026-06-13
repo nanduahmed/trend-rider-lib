@@ -12,9 +12,9 @@
             "module": "trend_rider_lib",
             "args": [
                 "scan",
-                "WINDLAS.NS",
+                "TIINDIA.NS",
                 "--start-date",
-                "2021-08-01",
+                "2017-11-01",
                 "--end-date",
                 "2025-02-03",
                 "--debug-csv"
@@ -40,6 +40,14 @@
                 "--ticker",
                 "SMLMAH.NS"
             ],
+        }
+    ,
+        {
+            "name": "TR GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.app",
+            "console": "integratedTerminal"
         }
     ]
 }

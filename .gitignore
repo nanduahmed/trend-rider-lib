@@ -61,3 +61,4 @@ trend_rider.sqlite
 data/**
 .~*.xlsx#
 backtest_results.xlsx
+app/trend_rider_app.sqlite
