@@ -11,3 +11,5 @@ rich>=13.0.0
 typer>=0.10.0
 pytest>=7.0.0
 pytest-cov>=4.0.0
+
+tkcalendar>=1.6.1
