@@ -71,6 +71,69 @@ class UptrendRecord:
         else:
             return UptrendStrength.WEAK
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize UptrendRecord to dict for JSON persistence."""
+        result = {}
+        for attr in (
+            "start_date", "end_date", "cycle_id", "start_state", "end_state",
+            "start_price", "end_price", "first_buy_zone_date", "first_buy_zone_price",
+            "daily_ema21_cross_date", "daily_ema21_cross_price",
+            "daily_downtrend_trigger_date", "daily_downtrend_trigger_price",
+            "num_weeks", "closes_above_ema", "closes_below_ema", "pct_closes_above",
+            "strength",
+            "highest_price", "highest_price_date", "lowest_price", "lowest_price_date",
+            "roc_1w_pct", "roc_3w_pct", "roc_6m_pct", "roc_9m_pct",
+            "max_profit_pct", "trend_roc_pct", "ema21_slope",
+            "ema34_55_spread", "ema34_55_spread_pct", "efficiency_ratio",
+            "ath_price", "ath_date", "distance_from_ath_abs", "distance_from_ath_pct",
+            "weekly_close_history", "daily_close_history",
+            "daily_ema21_history", "daily_ema34_history", "daily_ema55_history",
+        ):
+            val = getattr(self, attr, None)
+            if isinstance(val, datetime):
+                val = val.isoformat()
+            elif isinstance(val, UptrendStrength):
+                val = val.name
+            result[attr] = val
+        return result
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "UptrendRecord":
+        """Reconstruct an UptrendRecord from a dict (deserialization)."""
+        start_date = d.get("start_date")
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date)
+        elif start_date is None:
+            start_date = datetime.min
+        record = cls(start_date=start_date)
+        # Map fields
+        for attr in (
+            "end_date", "cycle_id", "start_state", "end_state",
+            "start_price", "end_price", "first_buy_zone_date", "first_buy_zone_price",
+            "daily_ema21_cross_date", "daily_ema21_cross_price",
+            "daily_downtrend_trigger_date", "daily_downtrend_trigger_price",
+            "num_weeks", "closes_above_ema", "closes_below_ema", "pct_closes_above",
+            "strength",
+            "highest_price", "highest_price_date", "lowest_price", "lowest_price_date",
+            "roc_1w_pct", "roc_3w_pct", "roc_6m_pct", "roc_9m_pct",
+            "max_profit_pct", "trend_roc_pct", "ema21_slope",
+            "ema34_55_spread", "ema34_55_spread_pct", "efficiency_ratio",
+            "ath_price", "ath_date", "distance_from_ath_abs", "distance_from_ath_pct",
+            "weekly_close_history", "daily_close_history",
+            "daily_ema21_history", "daily_ema34_history", "daily_ema55_history",
+        ):
+            val = d.get(attr)
+            # Convert ISO datetime strings back to datetime
+            if attr.endswith("_date") and isinstance(val, str):
+                try:
+                    val = datetime.fromisoformat(val)
+                except (ValueError, TypeError):
+                    pass
+            if attr == "strength" and isinstance(val, str):
+                val = UptrendStrength[val]
+            setattr(record, attr, val)
+        return record
+
 
 class SignalEvent:
     """Event representing a trading signal."""
@@ -253,35 +316,158 @@ class StockContext:
         self.trend_cycle_id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "ticker": self.ticker,
-            "current_state": self.current_state,
-            "last_ema21": self.last_ema21,
-            "last_ema34": self.last_ema34,
-            "last_ema55": self.last_ema55,
-            "trend_start_date": self.trend_start_date,
-            "trend_end_date": self.trend_end_date,
-            "daily_ema21_cross_date": self.daily_ema21_cross_date,
-            "daily_downtrend_trigger_date": self.daily_downtrend_trigger_date,
-            "first_buy_zone_date": self.first_buy_zone_date,
-            "positive_crossover_date": self.positive_crossover_date,
-            "tr_qualified": self.tr_qualified,
-            "is_buyzone": self.is_buyzone,
-            "uptrend_weeks": self.uptrend_weeks,
-            "weekly_candle_count": self.weekly_candle_count,
-            "closes_above_ema": self.closes_above_ema,
-            "closes_below_ema": self.closes_below_ema,
-            "is_crossover_detected": self.is_crossover_detected,
-            "crossover_date": self.crossover_date,
-            "crossover_price": self.crossover_price,
-            "longName": self.longName,
-            "sector": self.sector,
-            "industry": self.industry,
-            "marketCap": self.marketCap,
-            "website": self.website,
-            "nextDividendDate": self.nextDividendDate,
-            "isin": self.isin,
-        }
+        """Serialize StockContext to dict for JSON persistence.
+
+        Includes ALL fields, with proper serialization of nested objects,
+        enums, and datetime values.
+        """
+        result = {}
+        # Constructor fields (the ones accepted in __init__)
+        for attr in (
+            "ticker", "current_state", "last_ema21", "last_ema34", "last_ema55",
+            "trend_start_date", "trend_end_date",
+            "daily_ema21_cross_date", "daily_downtrend_trigger_date",
+            "first_buy_zone_date", "positive_crossover_date",
+            "tr_qualified", "is_buyzone", "uptrend_weeks", "weekly_candle_count",
+            "closes_above_ema", "closes_below_ema",
+            "is_crossover_detected", "crossover_date", "crossover_price",
+            "longName", "sector", "industry", "marketCap", "website",
+            "nextDividendDate", "isin",
+        ):
+            val = getattr(self, attr, None)
+            result[attr] = val
+
+        # Extra fields not in constructor
+        extra_attrs = (
+            "daily_ema21_cross_price", "daily_downtrend_trigger_price",
+            "first_buy_zone_price", "positive_crossover_price",
+            "buy_signal_emitted", "last_buy_signal_type",
+            "uptrend_start_date", "last_close",
+            "warmup_complete", "candle_count", "trend_cycle_id",
+        )
+        for attr in extra_attrs:
+            val = getattr(self, attr, None)
+            if isinstance(val, datetime):
+                val = val.isoformat()
+            result[attr] = val
+
+        # last_update and last_buy_signal_date/last_buy_signal_crossover_date
+        for attr in ("last_update", "last_buy_signal_date", "last_buy_signal_crossover_date"):
+            val = getattr(self, attr, None)
+            if isinstance(val, datetime):
+                val = val.isoformat()
+            result[attr] = val
+
+        # classification (enum -> str)
+        cls_val = getattr(self, "classification", None)
+        if cls_val is not None and isinstance(cls_val, Classification):
+            result["classification"] = cls_val.name
+        else:
+            result["classification"] = cls_val
+
+        # current_uptrend (UptrendRecord -> dict)
+        cu = getattr(self, "current_uptrend", None)
+        result["current_uptrend"] = cu.to_dict() if cu else None
+
+        # uptrend_history (list of UptrendRecord -> list of dict)
+        uh = getattr(self, "uptrend_history", [])
+        result["uptrend_history"] = [u.to_dict() for u in uh]
+
+        return result
 
     def __repr__(self) -> str:
         return f"StockContext(ticker={self.ticker}, classification={self.classification})"
+
+
+def context_from_dict(d: Dict[str, Any]) -> StockContext:
+    """Reconstruct a StockContext from a dict (deserialization).
+
+    Handles nested UptrendRecord lists, enum values, and datetime strings.
+    """
+    # Build with constructor fields only
+    ctx = StockContext(
+        ticker=d.get("ticker", ""),
+        current_state=d.get("current_state"),
+        last_ema21=d.get("last_ema21"),
+        last_ema34=d.get("last_ema34"),
+        last_ema55=d.get("last_ema55"),
+        trend_start_date=d.get("trend_start_date"),
+        trend_end_date=d.get("trend_end_date"),
+        daily_ema21_cross_date=d.get("daily_ema21_cross_date"),
+        daily_downtrend_trigger_date=d.get("daily_downtrend_trigger_date"),
+        first_buy_zone_date=d.get("first_buy_zone_date"),
+        positive_crossover_date=d.get("positive_crossover_date"),
+        tr_qualified=bool(d.get("tr_qualified", False)),
+        is_buyzone=bool(d.get("is_buyzone", False)),
+        uptrend_weeks=int(d.get("uptrend_weeks", 0)),
+        weekly_candle_count=int(d.get("weekly_candle_count", 0)),
+        closes_above_ema=int(d.get("closes_above_ema", 0)),
+        closes_below_ema=int(d.get("closes_below_ema", 0)),
+        is_crossover_detected=bool(d.get("is_crossover_detected", False)),
+        crossover_date=d.get("crossover_date"),
+        crossover_price=d.get("crossover_price"),
+        longName=d.get("longName"),
+        sector=d.get("sector"),
+        industry=d.get("industry"),
+        marketCap=d.get("marketCap"),
+        website=d.get("website"),
+        nextDividendDate=d.get("nextDividendDate"),
+        isin=d.get("isin"),
+    )
+
+    # Set extra fields
+    for attr in (
+        "daily_ema21_cross_price", "daily_downtrend_trigger_price",
+        "first_buy_zone_price", "positive_crossover_price",
+        "buy_signal_emitted", "last_buy_signal_type",
+        "candle_count", "trend_cycle_id",
+    ):
+        if attr in d:
+            setattr(ctx, attr, d[attr])
+
+    # Numeric / datetime fields
+    for attr in ("uptrend_start_date", "last_close", "warmup_complete"):
+        if attr in d:
+            val = d[attr]
+            if attr.endswith("_date") and isinstance(val, str):
+                try:
+                    val = datetime.fromisoformat(val)
+                except (ValueError, TypeError):
+                    pass
+            setattr(ctx, attr, val)
+
+    # Date fields
+    for attr in ("last_update", "last_buy_signal_date", "last_buy_signal_crossover_date"):
+        if attr in d:
+            val = d[attr]
+            if isinstance(val, str):
+                try:
+                    val = datetime.fromisoformat(val)
+                except (ValueError, TypeError):
+                    pass
+            setattr(ctx, attr, val)
+
+    # classification (str -> Classification enum)
+    cls_val = d.get("classification")
+    if isinstance(cls_val, str):
+        try:
+            ctx.classification = Classification[cls_val]
+        except (KeyError, ValueError):
+            ctx.classification = cls_val
+    else:
+        ctx.classification = cls_val
+
+    # current_uptrend (dict -> UptrendRecord)
+    cu = d.get("current_uptrend")
+    if isinstance(cu, dict):
+        ctx.current_uptrend = UptrendRecord.from_dict(cu)
+
+    # uptrend_history (list of dict -> list of UptrendRecord)
+    uh = d.get("uptrend_history", [])
+    if isinstance(uh, list):
+        ctx.uptrend_history = [
+            UptrendRecord.from_dict(u) if isinstance(u, dict) else u
+            for u in uh
+        ]
+
+    return ctx

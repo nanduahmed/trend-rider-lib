@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "trend-rider-lib"
-version = "0.3.0"
+version = "0.3.1"
 description = "Stock trend analysis and trading system with state machine architecture"
 readme = "README.md"
 license = { text = "MIT" }
@@ -57,4 +57,4 @@ tr = "trend_rider_lib.cli:app"
 include = ["trend_rider_lib*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "app/tests"]
