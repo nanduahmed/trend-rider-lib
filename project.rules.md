@@ -1,11 +1,42 @@
 # Trend Rider — Project Rules
 
+## Table of Contents
+
+- [Package Structure](#package-structure)
+- [Module Layout](#module-layout)
+- [Hard Rules](#hard-rules)
+  - [Algorithm Design & Modification Protocol](#algorithm-design--modification-protocol)
+  - [Design Change Classification](#design-change-classification)
+- [Library Changes](#library-changes)
+- [Library](#library)
+- [CLI](#cli)
+- [APP](#app)
+- [Environment](#environment)
+- [Testing](#testing)
+- [Critical Implementation Rules](#critical-implementation-rules)
+  - [Candle Processing Order](#candle-processing-order)
+  - [FSM State Restoration](#fsm-state-restoration)
+  - [Stock tr_qualified Flag](#stock-tr_qualified-flag)
+  - [EMA Calculations](#ema-calculations)
+- [Pine Scripts](#pine-scripts)
+  - [Design Change Protocol for Pine Scripts](#design-change-protocol-for-pine-scripts)
+  - [Rules for Pine Scripts](#rules-for-pine-scripts)
+  - [Buy Zone Marking on Chart Intervals](#buy-zone-marking-on-chart-intervals)
+  - [What Constitutes a Design-Breaking Change](#what-constitutes-a-design-breaking-change)
+- [Documentation](#documentation)
+  - [design.md](#designmd)
+
+---
+
 ## Package Structure
 
 Two packages. Strictly separate.
 
 *   `trend_rider_lib/` — logic only
-*   `trend_rider_cli/` — display and wiring only
+*   `app/` — App contains a cli app and tkinter app
+*   When user refer `cli app`, change must be made to app/cli.py
+*   When user refers `cli interface`, change must be made to trend_rider_lib/cli.py
+*   When user refers to `app`, he refers to tkinter app in app/app.py
 
 ## Module Layout
 
@@ -13,9 +44,6 @@ Two packages. Strictly separate.
 
 core/ enums.py, config.py, models.py indicators/ resampler.py, ema_engine.py, flag_computer.py state_machine/ fsm.py, stock_context.py, uptrend_record.py, classifier.py, fsm_serializer.py signals/ signal_engine.py, signal_store.py trading/ tsl_engine.py, trade_manager.py, trade_store.py persistence/ interfaces.py, sqlite_provider.py, xlsx_provider.py downloader/ yfinance_downloader.py engine.py
 
-### trend_rider_cli/
-
-cli/ app.py commands/ scan.py, update.py, show.py, classify.py, trades.py, report.py, backtest.py, clean.py display/ tables.py, panels.py, progress.py, formatters.py utils/ resolver.py, provider_factory.py, ticker_loader.py
 
 ## Hard Rules
 
@@ -53,7 +81,7 @@ Update the design change log section
 When modifying anything to the library, make sure the following
 
 1.  The entire historical scan works fine
-2.  The incremental update must preserve the new changes , The result of current  full scan and with the partial incremental update must be similar
+2.  The incremental update must preserve the new changes , The result of current full scan and with the partial incremental update must be similar
 3.  The incremental scan updates all trends analytics, trade open/close status and backtesting results
 
 ## Library
@@ -69,16 +97,28 @@ When modifying anything to the library, make sure the following
 *   Absolute imports only: `from trend_rider_lib import ...`
 *   NEVER relative import from library
 *   ZERO business logic — only wiring, display, error handling
-*   ONE `Console` instance created in `app.py`, passed everywhere
 *   All errors: `console.print(...)` + `raise typer.Exit(code=1)`
 *   NEVER `typer.Exit(message=...)` — invalid parameter
 *   NEVER `typer.echo()` for Rich markup — use `console.print()`
+
+## APP
+
+*   App refers to tkinter app.
+*   Absolute imports only: `from trend_rider_lib import ...`
+*   NEVER relative import from library
+*   ZERO business logic — only wiring, display, error handling
 
 ---
 
 ## Environment
 
 Always install and execute in venv (check existing .venv)
+
+## Testing
+
+*   No tests must be created at the project root level.
+*   Library tests must go under `tests/`.
+*   App tests must go under `app/tests/`.
 
 ## Critical Implementation Rules
 
