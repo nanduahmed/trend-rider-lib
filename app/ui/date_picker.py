@@ -1,22 +1,23 @@
 """
-Tkinter-friendly wrapper around tkcalendar's DateEntry.
+CustomTkinter‑compatible date picker wrapper around tkcalendar's DateEntry.
 
-Features:
-- Optional year/month drop‑downs.
-- Validation that end date is not earlier than start date.
-- Provides ``get_date`` and ``set_date`` API.
-- Emits a custom virtual event ``<<DateChanged>>`` whenever a new date is selected.
-- Styles to match the surrounding Tkinter theme.
-- Exposes `is_valid` flag.
+Features
+--------
+- Matches CustomTkinter dark/light appearance.
+- Optional year/month drop‑downs (enabled by tkcalendar by default).
+- Returns dates as ``datetime`` objects and ISO ``YYYY‑MM‑DD`` strings.
+- Validation that an end date does not precede a start date.
+- Emits a ``<<DateChanged>>`` virtual event on selection.
 """
 
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
 from datetime import datetime
-from typing import Optional
+from tkinter import messagebox
+from tkinter import ttk
+
+import customtkinter as ctk
 
 try:
     from tkcalendar import DateEntry
@@ -26,101 +27,140 @@ except Exception as exc:  # pragma: no cover – optional dependency
     ) from exc
 
 
-class HistoricalDatePicker(ttk.Frame):
-    """A configurable date picker that supports historical dates.
+class CTkDatePicker(ctk.CTkFrame):
+    """A CustomTkinter‑styled wrapper for ``tkcalendar.DateEntry``.
 
-    The widget is built on top of `tkcalendar.DateEntry` but adds a few
-    conveniences for the scanner UI:
-    * Drop‑down for year and month.
-    * ISO‑style ``YYYY-MM-DD`` output.
-    * Validation that the end date cannot precede the start date.
-    * Optional label text.
-    * ``<<DateChanged>>`` virtual event is emitted when the date changes.
+    Parameters
+    ----------
+    master: tk.Widget
+        Parent widget.
+    label: str | None, optional
+        Optional text label displayed to the left of the picker.
+    initial: datetime | None, optional
+        Initial date to display; defaults to today.
+    min_date, max_date: datetime | None, optional
+        Limits for selectable dates.
+    **kwargs:
+        Additional keyword arguments passed to ``CTkFrame``.
     """
 
-    def __init__(self,
-                 parent: tk.Widget,
-                 *,
-                 label: str | None = None,
-                 initial: Optional[datetime] = None,
-                 min_date: Optional[datetime] = None,
-                 max_date: Optional[datetime] = None,
-                 **kwargs):
-        super().__init__(parent, **kwargs)
-        self._label_var = tk.StringVar(value=label or "" if label else "")
+    def __init__(
+        self,
+        master: tk.Widget,
+        *,
+        label: str | None = None,
+        initial: datetime | None = None,
+        min_date: datetime | None = None,
+        max_date: datetime | None = None,
+        enabled: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__(master, **kwargs)
+        self._label_var = tk.StringVar(value=label or "")
         if label:
-            ttk.Label(self, textvariable=self._label_var).pack(side=tk.LEFT)
+            ctk.CTkLabel(self, textvariable=self._label_var).pack(side=tk.LEFT, padx=2)
 
-        # Configure DateEntry options
-        de_kwargs = {
+        # Determine background colour that matches CustomTkinter theme.
+        # ``CTkFrame`` background can be obtained via ``cget('bg_color')``.
+        bg = self.cget("bg_color")
+        de_kwargs: dict = {
             "width": 12,
             "mindate": min_date,
             "maxdate": max_date,
             "borderwidth": 1,
             "relief": "ridge",
-            "background": "#f0f0f0" if self.cget("bg") == "SystemButtonFace" else self.cget("bg"),  # adjust background
+            # "background": bg[1] if isinstance(bg, tuple) else bg,
             "date_pattern": "yyyy-mm-dd",
             "showweeknumbers": False,
         }
         if initial:
-            de_kwargs["year"] = initial.year
-            de_kwargs["month"] = initial.month
-            de_kwargs["day"] = initial.day
+            de_kwargs.update({"year": initial.year, "month": initial.month, "day": initial.day})
 
-        # year and month drop‑down menus are enabled by default in tkcalendar
+        # Create the underlying DateEntry.
         self.date_entry = DateEntry(self, **de_kwargs)
         self.date_entry.pack(side=tk.LEFT, padx=2, pady=2)
 
+        # Bind tkcalendar's event to our custom virtual event.
         self.date_entry.bind("<<DateEntrySelected>>", self._on_date_change)
         self.is_valid = True
+        self._enabled = enabled
 
+        # Apply initial enabled/disabled state
+        state = "normal" if enabled else "disabled"
+        self.date_entry.configure(state=state)
+
+    # ---------------------------------------------------------------------
+    # Event handling
+    # ---------------------------------------------------------------------
     def _on_date_change(self, event: tk.Event | None = None) -> None:
+        """Callback when the user selects a new date.
+
+        Emits ``<<DateChanged>>`` so external code can react.
+        """
         self.is_valid = True
         self.event_generate("<<DateChanged>>")
 
-    def get_date(self) -> Optional[datetime]:
-        """Return the selected date as a ``datetime`` object.
+    # ---------------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------------
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable the date picker widget.
 
-        If the widget does not have a valid date, ``None`` is returned.
+        When disabled, ``get_date()`` and ``get_date_str()`` return ``None``
+        so callers naturally omit date parameters for full-history downloads.
         """
+        self._enabled = enabled
+        state = "normal" if enabled else "disabled"
+        self.date_entry.configure(state=state)
+
+    def get_date(self) -> datetime | None:
+        """Return the selected date as a ``datetime`` object or ``None``.
+
+        Returns ``None`` when the picker is disabled.
+        """
+        if not self._enabled:
+            return None
         try:
             return self.date_entry.get_date()
         except Exception:
             return None
 
-    def set_date(self, date: datetime | str) -> None:
-        """Set the picker to the given date.
+    def get_date_str(self) -> str | None:
+        """Return the selected date formatted as ``YYYY‑MM‑DD``.
 
-        ``date`` may be a ``datetime`` object or a string of the form
-        ``YYYY-MM-DD``.
+        Returns ``None`` when the picker is disabled.
+        """
+        dt = self.get_date()
+        return dt.strftime("%Y-%m-%d") if dt else None
+
+    def set_date(self, date: datetime | str) -> None:
+        """Set the picker to ``date``.
+
+        ``date`` may be a ``datetime`` instance or an ISO ``YYYY‑MM‑DD`` string.
         """
         if isinstance(date, str):
             try:
                 date = datetime.strptime(date, "%Y-%m-%d")
             except Exception as exc:  # pragma: no cover – defensive
-                raise ValueError(repr(date)) from exc
+                raise ValueError(f"Invalid date string: {date}") from exc
         if not isinstance(date, datetime):  # pragma: no cover – defensive
-            raise TypeError("date must be datetime or string")
+            raise TypeError("date must be datetime or str")
         self.date_entry.set_date(date)
 
-    def validate(self, other_date: Optional[datetime] = None) -> bool:
-        """Validate the date and optionally enforce bounds.
+    def validate(self, other_date: datetime | None = None) -> bool:
+        """Validate the selected date.
 
-        Parameters
-        ----------
-        other_date:
-            If provided and ``self.get_date()`` is later than ``other_date``
-            then an error dialog is shown and ``False`` is returned.
-            This method is handy for ensuring that an EndDate picker does
-            not precede a StartDate picker.
+        If ``other_date`` is provided and the current date is earlier, an error
+        dialog is shown and ``False`` is returned.
         """
-        date = self.get_date()
-        if date is None:
+        cur = self.get_date()
+        if cur is None:
             self.is_valid = False
             return False
-        if other_date and date < other_date:
+        if other_date and cur < other_date:
             messagebox.showerror(
-                "Date Validation", "End Date cannot be earlier than Start Date."
+                "Date Validation",
+                "End Date cannot be earlier than Start Date.",
             )
             self.is_valid = False
             return False
@@ -128,10 +168,8 @@ class HistoricalDatePicker(ttk.Frame):
         return True
 
     def bind_validate(self, callback) -> None:
-        """Convenience to bind to the ``<<DateChanged>>`` virtual event.
-
-        ``callback`` receives no arguments.
+        """Convenient helper to bind a ``callback`` to ``<<DateChanged>>``.
         """
         self.bind("<<DateChanged>>", lambda e: callback())
 
-# End of file
+    # End of class

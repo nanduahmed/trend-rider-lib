@@ -1,3 +1,4 @@
+import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -5,12 +6,11 @@ from datetime import datetime
 from app.database import Database
 from trend_rider_lib.core.models import StockContext, SignalEvent, TradeRecord
 
-class ResultsTab(ttk.Frame):
+
+class ResultsTab(ctk.CTkFrame):
     """Tab that displays persisted scan results.
 
-    It fetches all stored :class:`StockContext` objects from the SQLite DB and
-    presents them in a sortable ``Treeview``.  Double‑clicking a row opens a
-    ``DetailWindow`` showing the full context, signals and trades.
+    The UI has been migrated to **customtkinter** for a modern look.
     """
 
     def __init__(self, master: tk.Widget):
@@ -22,11 +22,11 @@ class ResultsTab(ttk.Frame):
 
     def _build_ui(self) -> None:
         # Toolbar with refresh button
-        toolbar = ttk.Frame(self)
-        toolbar.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Button(toolbar, text="Refresh", command=self._refresh).pack(side=tk.LEFT)
+        toolbar = ctk.CTkFrame(self, corner_radius=0)
+        toolbar.pack(fill=tk.X, padx=10, pady=10)
+        ctk.CTkButton(toolbar, text="Refresh", command=self._refresh).pack(side=tk.LEFT)
 
-        # Treeview for results
+        # Treeview for results (ttk.Treeview does not have a customtkinter equivalent)
         columns = (
             "ticker",
             "state",
@@ -40,8 +40,13 @@ class ResultsTab(ttk.Frame):
         for col in columns:
             self.tree.heading(col, text=col.replace('_', ' ').title(), command=lambda _c=col: self._sort_by(_c, False))
             self.tree.column(col, width=100, anchor="center")
-        self.tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         self.tree.bind("<Double-1>", self._on_double_click)
+        self.tree.bind("<Button-3>", self._on_right_click)
+
+        # Right-click context menu
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(label="Remove from Database", command=self._remove_stock)
 
     def _populate(self) -> None:
         # Clear existing rows
@@ -51,15 +56,24 @@ class ResultsTab(ttk.Frame):
             contexts = self.db.get_all_contexts()
             for ctx in contexts:
                 ticker = getattr(ctx, "ticker", "")
-                state = getattr(ctx, "state", "")
+                # Get the attribute, then split by the dot and take the last element
+                state_full = getattr(ctx, "current_state", "")
+                state = state_full.split(".")[-1] if state_full else "-"
                 classification = getattr(ctx, "classification", "")
-                uptrends = len(getattr(ctx, "uptrends", []))
-                signals = len(getattr(ctx, "signals", []))
-                trades = len(getattr(ctx, "trades", []))
+                if hasattr(classification, "name"):
+                    classification = classification.name
+                elif classification is None:
+                    classification = "-"
+                uptrends = len(getattr(ctx, "uptrend_history", []))
+                # Query DB for actual signal/trade counts (not stored on context object)
+                signals = self.db.get_signal_count(ticker)
+                trades = self.db.get_trade_count(ticker)
                 last_update = getattr(ctx, "last_update", "")
                 # Ensure datetime string for sorting
                 if isinstance(last_update, datetime):
                     last_update = last_update.isoformat()
+                elif last_update is None:
+                    last_update = "-"
                 self.tree.insert(
                     "",
                     tk.END,
@@ -98,7 +112,23 @@ class ResultsTab(ttk.Frame):
         signals = self.db.get_signals(ticker)
         trades = self.db.get_trades(ticker)
         # Open detail window
+        from .detail_window import DetailWindow
         DetailWindow(self.master, ctx, signals, trades)
 
-# Import placed at end to avoid circular import issues
-from .detail_window import DetailWindow
+    def _on_right_click(self, event: tk.Event) -> None:
+        """Show right-click context menu on the treeview row."""
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        self.tree.selection_set(item)
+        self.context_menu.post(event.x_root, event.y_root)
+
+    def _remove_stock(self) -> None:
+        """Remove the selected stock from the database entirely."""
+        selection = self.tree.selection()
+        if not selection:
+            return
+        ticker = self.tree.item(selection[0], "values")[0]
+        if messagebox.askyesno("Confirm Remove", f"Remove {ticker} from database?\n\nThis will delete all stored data for this stock."):
+            self.db.delete_stock(ticker)
+            self._populate()

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-from trend_rider_lib.core.models import StockContext, SignalEvent, TradeRecord
+from trend_rider_lib.core.models import StockContext, SignalEvent, TradeRecord, context_from_dict
 
 
 class Database:
@@ -65,23 +65,35 @@ class Database:
 
     def get_all_contexts(self) -> List[StockContext]:
         cur = self.conn.cursor()
-        cur.execute("SELECT json FROM contexts")
+        cur.execute("SELECT json, last_update FROM contexts")
         rows = cur.fetchall()
         contexts = []
-        for (j,) in rows:
+        for (j, ts) in rows:
             d = json.loads(j)
-            # Recreate a StockContext – the library provides a constructor that matches the fields
-            ctx = StockContext(**d)  # type: ignore[arg-type]
+            ctx = context_from_dict(d)
+            # Restore last_update from the DB column (not from JSON, which predates this fix)
+            if not ctx.last_update and ts:
+                try:
+                    ctx.last_update = datetime.fromisoformat(ts)
+                except (ValueError, TypeError):
+                    ctx.last_update = ts
             contexts.append(ctx)
         return contexts
 
     def get_context(self, ticker: str) -> Optional[StockContext]:
         cur = self.conn.cursor()
-        cur.execute("SELECT json FROM contexts WHERE ticker = ?", (ticker,))
+        cur.execute("SELECT json, last_update FROM contexts WHERE ticker = ?", (ticker,))
         row = cur.fetchone()
         if row:
             d = json.loads(row[0])
-            return StockContext(**d)  # type: ignore[arg-type]
+            ctx = context_from_dict(d)
+            # Restore last_update from the DB column
+            if not ctx.last_update:
+                try:
+                    ctx.last_update = datetime.fromisoformat(row[1])
+                except (ValueError, TypeError):
+                    ctx.last_update = row[1]
+            return ctx
         return None
 
     # ---------- Signals ----------
@@ -94,6 +106,13 @@ class Database:
             (ticker, data, ts),
         )
         self.conn.commit()
+
+    def get_signal_count(self, ticker: str) -> int:
+        """Get the count of signals for a ticker (without loading all objects)."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM signals WHERE ticker = ?", (ticker,))
+        row = cur.fetchone()
+        return row[0] if row else 0
 
     def get_signals(self, ticker: str) -> List[SignalEvent]:
         cur = self.conn.cursor()
@@ -118,6 +137,13 @@ class Database:
         )
         self.conn.commit()
 
+    def get_trade_count(self, ticker: str) -> int:
+        """Get the count of trades for a ticker (without loading all objects)."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM trades WHERE ticker = ?", (ticker,))
+        row = cur.fetchone()
+        return row[0] if row else 0
+
     def get_trades(self, ticker: str) -> List[TradeRecord]:
         cur = self.conn.cursor()
         cur.execute("SELECT json FROM trades WHERE ticker = ? ORDER BY id", (ticker,))
@@ -128,3 +154,17 @@ class Database:
             tr = TradeRecord(**d)  # type: ignore[arg-type]
             trades.append(tr)
         return trades
+
+    def get_all_tickers(self) -> List[str]:
+        """Get all tickers in the database."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT ticker FROM contexts ORDER BY ticker")
+        return [row[0] for row in cur.fetchall()]
+
+    def delete_stock(self, ticker: str) -> None:
+        """Delete all data for a given ticker from all tables."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM contexts WHERE ticker = ?", (ticker,))
+        cur.execute("DELETE FROM signals WHERE ticker = ?", (ticker,))
+        cur.execute("DELETE FROM trades WHERE ticker = ?", (ticker,))
+        self.conn.commit()
