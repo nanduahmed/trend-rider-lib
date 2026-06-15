@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "trend-rider-lib"
-version = "0.3.1"
+version = "0.3.2"
 description = "Stock trend analysis and trading system with state machine architecture"
 readme = "README.md"
 license = { text = "MIT" }
