@@ -6,10 +6,12 @@ from tkinter import ttk
 try:
     from app.views.scan_tab import ScanTab
     from app.views.results_tab import ResultsTab
+    from app.views.update_tab import UpdateTab
 except ImportError as e:
     print(f"Warning: Could not import views: {e}")
     ScanTab = None
     ResultsTab = None
+    UpdateTab = None
 
 
 def main() -> None:
@@ -78,12 +80,24 @@ def main() -> None:
             results_view = ResultsTab(content_area)
             results_view.pack(fill="both", expand=True, padx=15, pady=15)
         else:
-            # Show placeholder if ResultsTab is not available
             placeholder = ctk.CTkLabel(content_area, text="Results view not available", 
-                                       font=("Segoe UI", 16))
+                                        font=("Segoe UI", 16))
             placeholder.pack(pady=50)
         set_active_button(results_btn)
         current_view["button"] = results_btn
+
+    def show_update():
+        """Display the Update tab for incremental updates."""
+        clear_content()
+        if UpdateTab:
+            update_view = UpdateTab(content_area)
+            update_view.pack(fill="both", expand=True, padx=15, pady=15)
+        else:
+            placeholder = ctk.CTkLabel(content_area, text="Update view not available",
+                                        font=("Segoe UI", 16))
+            placeholder.pack(pady=50)
+        set_active_button(update_btn)
+        current_view["button"] = update_btn
 
     # Navigation buttons with proper styling
     scan_btn = ctk.CTkButton(
@@ -99,6 +113,20 @@ def main() -> None:
         command=show_scan
     )
     scan_btn.pack(pady=8)
+
+    update_btn = ctk.CTkButton(
+        nav_frame,
+        text="Update",
+        width=180,
+        height=40,
+        corner_radius=8,
+        fg_color="transparent",
+        text_color="white",
+        font=("Segoe UI", 14),
+        anchor="w",
+        command=show_update
+    )
+    update_btn.pack(pady=8)
 
     results_btn = ctk.CTkButton(
         nav_frame,

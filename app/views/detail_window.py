@@ -227,13 +227,13 @@ class DetailWindow(ctk.CTkToplevel):
             ("Next Dividend", _format_date(ctx.nextDividendDate)),
         ]
         for r, (label, value) in enumerate(fund_items):
-            ttk.Label(self.fundamental_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.fundamental_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if label == "Website" and value and value != "—":
                 link = ttk.Label(self.fundamental_frame, text=value, foreground="blue", cursor="hand2")
                 link.grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
                 link.bind("<Button-1>", lambda e, url=value: webbrowser.open(url))
             else:
-                ttk.Label(self.fundamental_frame, text=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                ttk.Label(self.fundamental_frame, text=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Current State & Status
         state_items = [
@@ -244,11 +244,11 @@ class DetailWindow(ctk.CTkToplevel):
             ("Crossover Detected", ctx.is_crossover_detected),
         ]
         for r, (label, value) in enumerate(state_items):
-            ttk.Label(self.state_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.state_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if isinstance(value, bool):
                 _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
             else:
-                ttk.Label(self.state_frame, text=value or "—").grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                ttk.Label(self.state_frame, text=value or "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # EMA Indicators
         ema_items = [
@@ -259,8 +259,8 @@ class DetailWindow(ctk.CTkToplevel):
             ("Closes Below EMA", ctx.closes_below_ema),
         ]
         for r, (label, value) in enumerate(ema_items):
-            ttk.Label(self.ema_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
-            ttk.Label(self.ema_frame, text=value if value is not None else "—").grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.ema_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.ema_frame, text=value if value is not None else "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Trend Information
         trend_items = [
@@ -271,8 +271,8 @@ class DetailWindow(ctk.CTkToplevel):
             ("Current Uptrend", str(ctx.current_uptrend) if ctx.current_uptrend else "—"),
         ]
         for r, (label, value) in enumerate(trend_items):
-            ttk.Label(self.trend_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
-            ttk.Label(self.trend_frame, text=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.trend_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.trend_frame, text=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Key Date & Price Triggers – already populated in treeview later
         trigger_rows = [
@@ -298,11 +298,11 @@ class DetailWindow(ctk.CTkToplevel):
             ("Last Signal Crossover", _format_date(ctx.last_buy_signal_crossover_date)),
         ]
         for r, (label, value) in enumerate(buy_items):
-            ttk.Label(self.buy_signal_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.buy_signal_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if isinstance(value, bool):
-                _bool_label(self.buy_signal_frame, text=("✓" if value else "✗"), value=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                _bool_label(self.buy_signal_frame, text=("✓" if value else "✗"), value=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
             else:
-                ttk.Label(self.buy_signal_frame, text=value or "—").grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                ttk.Label(self.buy_signal_frame, text=value or "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Candle & Update Metadata
         meta_items = [
@@ -313,8 +313,8 @@ class DetailWindow(ctk.CTkToplevel):
             ("Classification", str(ctx.classification) if ctx.classification else "—"),
         ]
         for r, (label, value) in enumerate(meta_items):
-            ttk.Label(self.meta_frame, text=f"{label}:").grid(row=r, column=0, sticky=tk.W, padx=5, pady=2)
-            ttk.Label(self.meta_frame, text=value if value is not None else "—").grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.meta_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
+            ttk.Label(self.meta_frame, text=value if value is not None else "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
     # ---------------------------------------------------------------------
     # Populate Signals and Trades tables – unchanged logic

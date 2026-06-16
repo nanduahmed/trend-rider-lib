@@ -71,7 +71,7 @@ class ResultsTab(ctk.CTkFrame):
                 last_update = getattr(ctx, "last_update", "")
                 # Ensure datetime string for sorting
                 if isinstance(last_update, datetime):
-                    last_update = last_update.isoformat()
+                    last_update = last_update.strftime("%d-%m-%Y")
                 elif last_update is None:
                     last_update = "-"
                 self.tree.insert(
