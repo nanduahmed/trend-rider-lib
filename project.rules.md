@@ -110,6 +110,12 @@ When modifying anything to the library, make sure the following
 
 ---
 
+## Date Format
+
+Every readable date displayed to the user must be in `DD-MM-YYYY` format until explicitly asked to use a different format.
+
+---
+
 ## Environment
 
 Always install and execute in venv (check existing .venv)

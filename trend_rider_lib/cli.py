@@ -210,7 +210,7 @@ def open_db(db_path: Path) -> SQLiteProvider:
 
 
 def format_report_date(value: Optional[datetime]) -> str:
-    return value.strftime("%Y-%m-%d") if value else ""
+    return value.strftime("%d-%m-%Y") if value else ""
 
 
 def make_engine(db_path: Path) -> TrendRiderEngine:

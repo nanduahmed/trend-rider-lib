@@ -335,6 +335,11 @@ class StockContext:
             "nextDividendDate", "isin",
         ):
             val = getattr(self, attr, None)
+            # current_state may be a State enum object; store its .name string
+            if attr == "current_state":
+                from .enums import State
+                if isinstance(val, State):
+                    val = val.name
             result[attr] = val
 
         # Extra fields not in constructor
@@ -385,9 +390,14 @@ def context_from_dict(d: Dict[str, Any]) -> StockContext:
     Handles nested UptrendRecord lists, enum values, and datetime strings.
     """
     # Build with constructor fields only
+    current_state = d.get("current_state")
+    # Backward-compat: handle old data where State enum was serialized as
+    # "State.DOWNTREND" by json.dumps(default=str) instead of just "DOWNTREND".
+    if current_state and isinstance(current_state, str) and current_state.startswith("State."):
+        current_state = current_state.replace("State.", "")
     ctx = StockContext(
         ticker=d.get("ticker", ""),
-        current_state=d.get("current_state"),
+        current_state=current_state,
         last_ema21=d.get("last_ema21"),
         last_ema34=d.get("last_ema34"),
         last_ema55=d.get("last_ema55"),

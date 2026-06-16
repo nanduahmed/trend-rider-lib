@@ -5,12 +5,13 @@ without a database dependency.
 Callers implement the *IScanResultHandler* interface and receive
 results directly through it via composition (no callbacks).
 """
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional
 
 import pandas as pd
 
 from .core.config import TrendRiderConfig
-from .core.models import StockContext
+from .core.enums import TradeStatus
+from .core.models import StockContext, TradeRecord
 from .downloader.yfinance_downloader import YFinanceDownloader
 from .engine import TrendRiderEngine
 from .indicators.resampler import resample_daily_to_weekly
@@ -84,19 +85,107 @@ def scan_stocks(
     return results
 
 
-def update_stocks(
-    tickers: Optional[List[str]] = None,
-    handler: Optional[IScanResultHandler] = None,
-    db_path: Optional[str] = None,
-) -> Dict[str, StockContext]:
-    """
-    Not yet implemented for the handler-based API.
+class _UpdateBridge(BridgeProvider):
+    """Bridge pre-populated with existing contexts and trades for incremental update."""
 
-    Incremental updates require previously-saved state, so they
-    currently still rely on a SQLite database path.  This method
-    will be extended once an in-memory snapshot mechanism is added.
+    def __init__(
+        self,
+        handler: IScanResultHandler,
+        existing_contexts: Dict[str, StockContext],
+        existing_trades: Dict[str, List[TradeRecord]],
+    ) -> None:
+        super().__init__(handler)
+        self._saved_contexts = dict(existing_contexts)
+        self._trades_by_ticker: Dict[str, List[TradeRecord]] = {
+            t: list(trades) for t, trades in existing_trades.items()
+        }
+
+    def get_all_trades(self, ticker: Optional[str] = None) -> List[TradeRecord]:
+        if ticker:
+            return self._trades_by_ticker.get(ticker, [])
+        result: List[TradeRecord] = []
+        for trades in self._trades_by_ticker.values():
+            result.extend(trades)
+        return result
+
+    def get_open_trades(self, ticker: Optional[str] = None) -> List[TradeRecord]:
+        all_trades = self.get_all_trades(ticker)
+        return [t for t in all_trades if t.status == TradeStatus.OPEN]
+
+
+def update_stocks(
+    tickers: List[str],
+    handler: IScanResultHandler,
+    existing_contexts: Dict[str, StockContext],
+    existing_trades: Dict[str, List[TradeRecord]],
+    end_date: Optional[str] = None,
+) -> Dict[str, StockContext]:
+    """Run an incremental update for saved tickers.
+
+    Parameters
+    ----------
+    tickers:
+        Stock symbols to update.
+    handler:
+        Application-provided implementation of *IScanResultHandler* that
+        receives every context, signal and trade as they are produced.
+    existing_contexts:
+        Previously-saved StockContext objects, keyed by ticker.
+        These are used to restore FSM state before processing new candles.
+    existing_trades:
+        Previously-saved trades, keyed by ticker.  Restores the trade
+        manager so that open trades and trailing stops are maintained.
+    end_date:
+        Optional cutoff date (YYYY-MM-DD).  Only candles on or before
+        this date are processed.  Omit to process all available new data.
+
+    Returns
+    -------
+    dict[str, StockContext]
+        Final contexts for all updated tickers.
     """
-    raise NotImplementedError(
-        "Incremental update with IScanResultHandler is not yet available. "
-        "Use the CLI ``update`` command with a SQLite database for now."
+    bridge = _UpdateBridge(handler, existing_contexts, existing_trades)
+    config = TrendRiderConfig()
+    engine = TrendRiderEngine(config, bridge, bridge, bridge)
+
+    end_dt: Optional[pd.Timestamp] = (
+        pd.Timestamp(end_date) if end_date else None
     )
+
+    new_candles: Dict[str, pd.DataFrame] = {}
+    for ticker in tickers:
+        ctx = existing_contexts.get(ticker)
+        if not ctx or not ctx.last_update:
+            continue
+
+        last_date = ctx.last_update
+        if isinstance(last_date, str):
+            last_date = pd.Timestamp(last_date)
+        else:
+            last_date = pd.Timestamp(last_date)
+
+        daily_df = YFinanceDownloader.download_incremental(ticker, last_date, interval="1d")
+        weekly_df = YFinanceDownloader.download_incremental(ticker, last_date, interval="1wk")
+
+        if end_dt is not None:
+            if not daily_df.empty:
+                daily_df = daily_df[daily_df.index <= end_dt]
+            if not weekly_df.empty:
+                weekly_df = weekly_df[weekly_df.index <= end_dt]
+
+        if daily_df.empty and weekly_df.empty:
+            continue
+
+        merged = pd.concat([daily_df, weekly_df]).sort_index()
+        new_candles[ticker] = merged
+
+    if not new_candles:
+        return {}
+
+    handler.on_scan_started(tickers)
+    results = engine.run_incremental_update(list(new_candles.keys()), new_candles)
+    for ticker, ctx in results.items():
+        handler.on_ticker_completed(ticker, ctx)
+    handler.on_scan_completed(results)
+
+    return results
