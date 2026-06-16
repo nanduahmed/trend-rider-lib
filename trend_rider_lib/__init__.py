@@ -35,7 +35,7 @@ from .persistence.scan_handler import IScanResultHandler, BridgeProvider
 from .downloader import YFinanceDownloader
 from .api import scan_stocks
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 __all__ = [
     # Core
