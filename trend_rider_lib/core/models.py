@@ -129,19 +129,6 @@ class SignalEvent:
         if self.metadata is None:
             self.metadata = {}
 
-    # ------------------------------------------------------------------
-    # Serialization (thin wrappers around the generic serializer)
-    # ------------------------------------------------------------------
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to a JSON-compatible dict."""
-        return _to_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SignalEvent":
-        """Reconstruct from a dict (deserialization)."""
-        return _from_dict(cls, d)
-
 
 # ---------------------------------------------------------------------------
 # TrendEventRecord
@@ -169,19 +156,6 @@ class TrendEventRecord:
         if self.metadata is None:
             self.metadata = {}
 
-    # ------------------------------------------------------------------
-    # Serialization (thin wrappers around the generic serializer)
-    # ------------------------------------------------------------------
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to a JSON-compatible dict."""
-        return _to_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrendEventRecord":
-        """Reconstruct from a dict (deserialization)."""
-        return _from_dict(cls, d)
-
 
 # ---------------------------------------------------------------------------
 # TradeRecord
@@ -206,19 +180,6 @@ class TradeRecord:
     status: Optional[TradeStatus] = None
     exit_reason: Optional[ExitReason] = None
     profit_loss_pct: Optional[float] = None
-
-    # ------------------------------------------------------------------
-    # Serialization (thin wrappers around the generic serializer)
-    # ------------------------------------------------------------------
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to a JSON-compatible dict."""
-        return _to_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TradeRecord":
-        """Reconstruct from a dict (deserialization)."""
-        return _from_dict(cls, d)
 
 
 # ---------------------------------------------------------------------------

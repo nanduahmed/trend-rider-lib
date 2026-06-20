@@ -105,21 +105,9 @@ class DetailWindow(ctk.CTkToplevel):
         # Inner frame that will hold all cards – customtkinter frame
         self.inner = ctk.CTkFrame(self.canvas)
         self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-
-        def _on_inner_configure(event):
-            """Update scroll region and reflow sections on resize."""
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-            # Reflow section cards based on current width (1-3 columns)
-            width = event.width
-            if width < 700:
-                cols = 1
-            elif width < 1100:
-                cols = 2
-            else:
-                cols = 3
-            self._relayout_sections(cols)
-
-        self.inner.bind("<Configure>", _on_inner_configure)
+        # self.inner.bind("<Configure>", self._on_resize)
+        self.inner.bind("<Configure>", lambda e: self.canvas.configure(
+            scrollregion=self.canvas.bbox("all")))
 
         # ------------------------------------------------------------
         # Section cards – each is a CTkFrame with a 2‑column grid
@@ -197,6 +185,18 @@ class DetailWindow(ctk.CTkToplevel):
             self.ut_tree.column(col, width=90, anchor=anchor)
         self.ut_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+    # ---------------------------------------------------------------------
+    def _on_resize(self, event) -> None:
+        """Reflow section cards based on current width (1‑3 columns)."""
+        width = event.width
+        if width < 700:
+            cols = 1
+        elif width < 1100:
+            cols = 2
+        else:
+            cols = 3
+        self._relayout_sections(cols)
+
     def _relayout_sections(self, columns: int) -> None:
         """Place card frames into a responsive grid."""
         frames = [self.fundamental_frame, self.state_frame, self.ema_frame,
@@ -230,7 +230,7 @@ class DetailWindow(ctk.CTkToplevel):
             ttk.Label(self.fundamental_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if label == "Website" and value and value != "—":
                 link = ttk.Label(self.fundamental_frame, text=value, foreground="blue", cursor="hand2")
-                link.grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
+                link.grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
                 link.bind("<Button-1>", lambda e, url=value: webbrowser.open(url))
             else:
                 ttk.Label(self.fundamental_frame, text=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
@@ -246,7 +246,7 @@ class DetailWindow(ctk.CTkToplevel):
         for r, (label, value) in enumerate(state_items):
             ttk.Label(self.state_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if isinstance(value, bool):
-                _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
+                _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
             else:
                 ttk.Label(self.state_frame, text=value or "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
