@@ -133,6 +133,8 @@ def _encode_value(val: Any) -> Any:
         return to_dict(val)
     if isinstance(val, list):
         return [_encode_value(item) for item in val]
+    if isinstance(val, tuple):
+        return [_encode_value(item) for item in val]
     if isinstance(val, float) and math.isnan(val):
         return None
     return val

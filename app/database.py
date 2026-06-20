@@ -98,7 +98,7 @@ class Database:
 
     # ---------- Signals ----------
     def save_signal(self, ticker: str, signal: SignalEvent) -> None:
-        data = json.dumps(signal.__dict__, default=str)
+        data = json.dumps(signal.to_dict(), default=str)
         ts = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute(
@@ -121,14 +121,13 @@ class Database:
         signals = []
         for (j,) in rows:
             d = json.loads(j)
-            # Construct SignalEvent – use dict unpacking where possible
-            sig = SignalEvent(**d)  # type: ignore[arg-type]
+            sig = SignalEvent.from_dict(d)
             signals.append(sig)
         return signals
 
     # ---------- Trades ----------
     def save_trade(self, trade: TradeRecord) -> None:
-        data = json.dumps(trade.__dict__, default=str)
+        data = json.dumps(trade.to_dict(), default=str)
         ts = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute(
@@ -151,7 +150,7 @@ class Database:
         trades = []
         for (j,) in rows:
             d = json.loads(j)
-            tr = TradeRecord(**d)  # type: ignore[arg-type]
+            tr = TradeRecord.from_dict(d)
             trades.append(tr)
         return trades
 
