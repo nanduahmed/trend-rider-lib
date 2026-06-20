@@ -49,8 +49,6 @@ class UptrendRecord:
         self.ath_date: Optional[datetime] = None
         self.distance_from_ath_abs: Optional[float] = None
         self.distance_from_ath_pct: Optional[float] = None
-        self.weekly_close_history: List = []
-        self.daily_close_history: List = []
         self.daily_ema21_history: List = []
         self.daily_ema34_history: List = []
         self.daily_ema55_history: List = []
@@ -86,7 +84,6 @@ class UptrendRecord:
             "max_profit_pct", "trend_roc_pct", "ema21_slope",
             "ema34_55_spread", "ema34_55_spread_pct", "efficiency_ratio",
             "ath_price", "ath_date", "distance_from_ath_abs", "distance_from_ath_pct",
-            "weekly_close_history", "daily_close_history",
             "daily_ema21_history", "daily_ema34_history", "daily_ema55_history",
         ):
             val = getattr(self, attr, None)
@@ -119,7 +116,6 @@ class UptrendRecord:
             "max_profit_pct", "trend_roc_pct", "ema21_slope",
             "ema34_55_spread", "ema34_55_spread_pct", "efficiency_ratio",
             "ath_price", "ath_date", "distance_from_ath_abs", "distance_from_ath_pct",
-            "weekly_close_history", "daily_close_history",
             "daily_ema21_history", "daily_ema34_history", "daily_ema55_history",
         ):
             val = d.get(attr)

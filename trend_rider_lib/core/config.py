@@ -16,6 +16,12 @@ class TrendRiderConfig(BaseModel):
     ema_daily_slow: int = Field(default=55, ge=1, description="Daily slow EMA (EMA55)")
     warmup_weeks: int = Field(default=25, ge=1, description="Initial warmup period in weeks")
 
+    # ROC Calculation Flag
+    calculate_roc: bool = Field(
+        default=False,
+        description="Enable ROC calculations"
+    )
+
     # Zone Parameters
     buy_zone_upper_pct: float = Field(
         default=0.05,
