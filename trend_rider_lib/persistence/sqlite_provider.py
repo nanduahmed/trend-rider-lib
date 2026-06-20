@@ -451,9 +451,7 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                 cycle.ema34_55_spread,
                 cycle.ema34_55_spread_pct,
                 cycle.efficiency_ratio,
-                cycle.end_price if cycle.end_price is not None else (
-                    cycle.daily_close_history[-1][1] if cycle.daily_close_history else None
-                ),
+                cycle.end_price,
             ),
         )
 

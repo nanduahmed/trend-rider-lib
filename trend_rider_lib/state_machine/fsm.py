@@ -11,7 +11,7 @@ from ..core.config import TrendRiderConfig
 from ..core.enums import Classification, SignalType, State, TrendEventType
 from ..indicators.flag_computer import candle_intersects_buy_zone
 from ..core.models import SignalEvent, StockContext, TrendEventRecord, UptrendRecord
-from .trend_metrics import record_daily_point, record_weekly_point, update_trend_metrics
+from .trend_metrics import record_daily_point, update_trend_metrics
 
 try:
     from transitions import Machine
@@ -289,8 +289,6 @@ class StockFSM:
 
         if self.is_in_buyzone():
             self._set_first_buy_zone(row)
-            if self.context.current_uptrend.first_buy_zone_date is not None:
-                record_weekly_point(self.context.current_uptrend, row.name, row.get("Close"))
 
         self._update_extremes(row)
         if self.context.current_uptrend is not None:
@@ -323,7 +321,6 @@ class StockFSM:
 
         self._update_extremes(row)
         if self.context.current_uptrend.first_buy_zone_date is not None:
-            record_weekly_point(self.context.current_uptrend, row.name, row.get("Close"))
             update_trend_metrics(self.context.current_uptrend, self.context.last_close)
 
         if self.context.uptrend_weeks == self.config.tr_qualify_weeks and not self.context.tr_qualified:

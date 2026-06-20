@@ -376,6 +376,106 @@ class StockContext:
 
         return result
 
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "StockContext":
+        """Reconstruct a StockContext from a dict (deserialization).
+
+        Handles nested UptrendRecord lists, enum values, and datetime strings.
+        This is the inverse of ``to_dict()``.
+        """
+        # Build with constructor fields only
+        current_state = d.get("current_state")
+        # Backward-compat: handle old data where State enum was serialized as
+        # "State.DOWNTREND" by json.dumps(default=str) instead of just "DOWNTREND".
+        if current_state and isinstance(current_state, str) and current_state.startswith("State."):
+            current_state = current_state.replace("State.", "")
+        ctx = cls(
+            ticker=d.get("ticker", ""),
+            current_state=current_state,
+            last_ema21=d.get("last_ema21"),
+            last_ema34=d.get("last_ema34"),
+            last_ema55=d.get("last_ema55"),
+            trend_start_date=d.get("trend_start_date"),
+            trend_end_date=d.get("trend_end_date"),
+            daily_ema21_cross_date=d.get("daily_ema21_cross_date"),
+            daily_downtrend_trigger_date=d.get("daily_downtrend_trigger_date"),
+            first_buy_zone_date=d.get("first_buy_zone_date"),
+            positive_crossover_date=d.get("positive_crossover_date"),
+            tr_qualified=bool(d.get("tr_qualified", False)),
+            is_buyzone=bool(d.get("is_buyzone", False)),
+            uptrend_weeks=int(d.get("uptrend_weeks", 0)),
+            weekly_candle_count=int(d.get("weekly_candle_count", 0)),
+            closes_above_ema=int(d.get("closes_above_ema", 0)),
+            closes_below_ema=int(d.get("closes_below_ema", 0)),
+            is_crossover_detected=bool(d.get("is_crossover_detected", False)),
+            crossover_date=d.get("crossover_date"),
+            crossover_price=d.get("crossover_price"),
+            longName=d.get("longName"),
+            sector=d.get("sector"),
+            industry=d.get("industry"),
+            marketCap=d.get("marketCap"),
+            website=d.get("website"),
+            nextDividendDate=d.get("nextDividendDate"),
+            isin=d.get("isin"),
+        )
+
+        # Set extra fields
+        for attr in (
+            "daily_ema21_cross_price", "daily_downtrend_trigger_price",
+            "first_buy_zone_price", "positive_crossover_price",
+            "buy_signal_emitted", "last_buy_signal_type",
+            "candle_count", "trend_cycle_id",
+        ):
+            if attr in d:
+                setattr(ctx, attr, d[attr])
+
+        # Numeric / datetime fields
+        for attr in ("uptrend_start_date", "last_close", "warmup_complete"):
+            if attr in d:
+                val = d[attr]
+                if attr.endswith("_date") and isinstance(val, str):
+                    try:
+                        val = datetime.fromisoformat(val)
+                    except (ValueError, TypeError):
+                        pass
+                setattr(ctx, attr, val)
+
+        # Date fields
+        for attr in ("last_update", "last_buy_signal_date", "last_buy_signal_crossover_date"):
+            if attr in d:
+                val = d[attr]
+                if isinstance(val, str):
+                    try:
+                        val = datetime.fromisoformat(val)
+                    except (ValueError, TypeError):
+                        pass
+                setattr(ctx, attr, val)
+
+        # classification (str -> Classification enum)
+        cls_val = d.get("classification")
+        if isinstance(cls_val, str):
+            try:
+                ctx.classification = Classification[cls_val]
+            except (KeyError, ValueError):
+                ctx.classification = cls_val
+        else:
+            ctx.classification = cls_val
+
+        # current_uptrend (dict -> UptrendRecord)
+        cu = d.get("current_uptrend")
+        if isinstance(cu, dict):
+            ctx.current_uptrend = UptrendRecord.from_dict(cu)
+
+        # uptrend_history (list of dict -> list of UptrendRecord)
+        uh = d.get("uptrend_history", [])
+        if isinstance(uh, list):
+            ctx.uptrend_history = [
+                UptrendRecord.from_dict(u) if isinstance(u, dict) else u
+                for u in uh
+            ]
+
+        return ctx
+
     def __repr__(self) -> str:
         return f"StockContext(ticker={self.ticker}, classification={self.classification})"
 
@@ -384,96 +484,8 @@ def context_from_dict(d: Dict[str, Any]) -> StockContext:
     """Reconstruct a StockContext from a dict (deserialization).
 
     Handles nested UptrendRecord lists, enum values, and datetime strings.
+
+    .. deprecated::
+        Use ``StockContext.from_dict()`` directly instead.
     """
-    # Build with constructor fields only
-    current_state = d.get("current_state")
-    # Backward-compat: handle old data where State enum was serialized as
-    # "State.DOWNTREND" by json.dumps(default=str) instead of just "DOWNTREND".
-    if current_state and isinstance(current_state, str) and current_state.startswith("State."):
-        current_state = current_state.replace("State.", "")
-    ctx = StockContext(
-        ticker=d.get("ticker", ""),
-        current_state=current_state,
-        last_ema21=d.get("last_ema21"),
-        last_ema34=d.get("last_ema34"),
-        last_ema55=d.get("last_ema55"),
-        trend_start_date=d.get("trend_start_date"),
-        trend_end_date=d.get("trend_end_date"),
-        daily_ema21_cross_date=d.get("daily_ema21_cross_date"),
-        daily_downtrend_trigger_date=d.get("daily_downtrend_trigger_date"),
-        first_buy_zone_date=d.get("first_buy_zone_date"),
-        positive_crossover_date=d.get("positive_crossover_date"),
-        tr_qualified=bool(d.get("tr_qualified", False)),
-        is_buyzone=bool(d.get("is_buyzone", False)),
-        uptrend_weeks=int(d.get("uptrend_weeks", 0)),
-        weekly_candle_count=int(d.get("weekly_candle_count", 0)),
-        closes_above_ema=int(d.get("closes_above_ema", 0)),
-        closes_below_ema=int(d.get("closes_below_ema", 0)),
-        is_crossover_detected=bool(d.get("is_crossover_detected", False)),
-        crossover_date=d.get("crossover_date"),
-        crossover_price=d.get("crossover_price"),
-        longName=d.get("longName"),
-        sector=d.get("sector"),
-        industry=d.get("industry"),
-        marketCap=d.get("marketCap"),
-        website=d.get("website"),
-        nextDividendDate=d.get("nextDividendDate"),
-        isin=d.get("isin"),
-    )
-
-    # Set extra fields
-    for attr in (
-        "daily_ema21_cross_price", "daily_downtrend_trigger_price",
-        "first_buy_zone_price", "positive_crossover_price",
-        "buy_signal_emitted", "last_buy_signal_type",
-        "candle_count", "trend_cycle_id",
-    ):
-        if attr in d:
-            setattr(ctx, attr, d[attr])
-
-    # Numeric / datetime fields
-    for attr in ("uptrend_start_date", "last_close", "warmup_complete"):
-        if attr in d:
-            val = d[attr]
-            if attr.endswith("_date") and isinstance(val, str):
-                try:
-                    val = datetime.fromisoformat(val)
-                except (ValueError, TypeError):
-                    pass
-            setattr(ctx, attr, val)
-
-    # Date fields
-    for attr in ("last_update", "last_buy_signal_date", "last_buy_signal_crossover_date"):
-        if attr in d:
-            val = d[attr]
-            if isinstance(val, str):
-                try:
-                    val = datetime.fromisoformat(val)
-                except (ValueError, TypeError):
-                    pass
-            setattr(ctx, attr, val)
-
-    # classification (str -> Classification enum)
-    cls_val = d.get("classification")
-    if isinstance(cls_val, str):
-        try:
-            ctx.classification = Classification[cls_val]
-        except (KeyError, ValueError):
-            ctx.classification = cls_val
-    else:
-        ctx.classification = cls_val
-
-    # current_uptrend (dict -> UptrendRecord)
-    cu = d.get("current_uptrend")
-    if isinstance(cu, dict):
-        ctx.current_uptrend = UptrendRecord.from_dict(cu)
-
-    # uptrend_history (list of dict -> list of UptrendRecord)
-    uh = d.get("uptrend_history", [])
-    if isinstance(uh, list):
-        ctx.uptrend_history = [
-            UptrendRecord.from_dict(u) if isinstance(u, dict) else u
-            for u in uh
-        ]
-
-    return ctx
+    return StockContext.from_dict(d)

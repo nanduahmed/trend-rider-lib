@@ -20,7 +20,7 @@ from trend_rider_lib import (
 )
 from trend_rider_lib.persistence import SQLiteProvider
 from trend_rider_lib.state_machine.fsm import StockFSM
-from trend_rider_lib.state_machine.trend_metrics import record_daily_point, record_weekly_point, update_trend_metrics
+from trend_rider_lib.state_machine.trend_metrics import record_daily_point, update_trend_metrics
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "delhivery_weekly_confirmation.csv"
@@ -323,10 +323,6 @@ def test_analytics_and_ath_metrics_from_first_official_buy_zone():
 
     for offset, close in enumerate([100.0, 103.0, 108.0, 112.0, 120.0]):
         date = pd.Timestamp("2024-01-01") + pd.Timedelta(weeks=offset)
-        record_weekly_point(uptrend, date, close)
-
-    for offset, close in enumerate([100.0, 101.0, 105.0, 110.0, 115.0, 120.0]):
-        date = pd.Timestamp("2024-01-01") + pd.Timedelta(days=offset)
         record_daily_point(uptrend, date, close, 90.0 + offset, 80.0 + offset, 70.0 + offset)
 
     uptrend.highest_price = 130.0
@@ -339,8 +335,8 @@ def test_analytics_and_ath_metrics_from_first_official_buy_zone():
     assert uptrend.ath_date == pd.Timestamp("2024-01-10")
     assert uptrend.distance_from_ath_abs == 10.0
     assert uptrend.distance_from_ath_pct == pytest.approx(7.6923, rel=1e-3)
-    assert uptrend.roc_1w_pct == pytest.approx(7.1429, rel=1e-3)
-    assert uptrend.roc_3w_pct == pytest.approx(16.5049, rel=1e-3)
+    assert uptrend.roc_1w_pct is None
+    assert uptrend.roc_3w_pct is None
     assert uptrend.roc_6m_pct is None
     assert uptrend.roc_9m_pct is None
     assert uptrend.ema21_slope is not None
@@ -388,8 +384,6 @@ def test_normalized_persistence_round_trip(tmp_path):
     context.current_uptrend.ath_date = datetime(2024, 1, 2)
     context.current_uptrend.distance_from_ath_abs = 10.0
     context.current_uptrend.distance_from_ath_pct = 7.6923
-    context.current_uptrend.weekly_close_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 8), 110.0)]
-    context.current_uptrend.daily_close_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 2), 120.0)]
     context.current_uptrend.daily_ema21_history = [(datetime(2024, 1, 1), 100.0), (datetime(2024, 1, 2), 101.0)]
     context.current_uptrend.daily_ema34_history = [(datetime(2024, 1, 1), 99.0), (datetime(2024, 1, 2), 102.0)]
     context.current_uptrend.daily_ema55_history = [(datetime(2024, 1, 1), 98.0), (datetime(2024, 1, 2), 100.0)]

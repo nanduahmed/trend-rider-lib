@@ -51,25 +51,15 @@ def _efficiency_ratio(points: list[tuple[datetime, float]]) -> Optional[float]:
 def record_daily_point(
     uptrend: UptrendRecord,
     date: datetime,
-    close: Optional[float],
+    _close: Optional[float],
     ema21: Optional[float],
     ema34: Optional[float],
     ema55: Optional[float],
 ) -> None:
-    """Track daily history for active analytics."""
-    _append_point(uptrend.daily_close_history, date, close)
+    """Track daily EMA history for active analytics."""
     _append_point(uptrend.daily_ema21_history, date, ema21)
     _append_point(uptrend.daily_ema34_history, date, ema34)
     _append_point(uptrend.daily_ema55_history, date, ema55)
-
-
-def record_weekly_point(
-    uptrend: UptrendRecord,
-    date: datetime,
-    close: Optional[float],
-) -> None:
-    """Track weekly history for ROC metrics."""
-    _append_point(uptrend.weekly_close_history, date, close)
 
 
 def update_trend_metrics(uptrend: UptrendRecord, current_close: Optional[float]) -> None:
@@ -95,17 +85,6 @@ def update_trend_metrics(uptrend: UptrendRecord, current_close: Optional[float])
             uptrend.distance_from_ath_abs = uptrend.ath_price - current_close
             uptrend.distance_from_ath_pct = ((uptrend.ath_price - current_close) / uptrend.ath_price) * 100.0
 
-    if uptrend.weekly_close_history:
-        weekly_closes = [value for _, value in uptrend.weekly_close_history]
-        if len(weekly_closes) > 1:
-            uptrend.roc_1w_pct = _roc(weekly_closes[-1], weekly_closes[-2])
-        if len(weekly_closes) > 3:
-            uptrend.roc_3w_pct = _roc(weekly_closes[-1], weekly_closes[-4])
-        if len(weekly_closes) > 26:
-            uptrend.roc_6m_pct = _roc(weekly_closes[-1], weekly_closes[-27])
-        if len(weekly_closes) > 39:
-            uptrend.roc_9m_pct = _roc(weekly_closes[-1], weekly_closes[-40])
-
     uptrend.ema21_slope = _normalized_regression_slope(uptrend.daily_ema21_history[-10:])
 
     if uptrend.daily_ema34_history and uptrend.daily_ema55_history:
@@ -115,5 +94,5 @@ def update_trend_metrics(uptrend: UptrendRecord, current_close: Optional[float])
         if ema55 != 0:
             uptrend.ema34_55_spread_pct = ((ema34 - ema55) / ema55) * 100.0
 
-    uptrend.efficiency_ratio = _efficiency_ratio(uptrend.daily_close_history)
+    uptrend.efficiency_ratio = _efficiency_ratio(uptrend.daily_ema21_history)
 

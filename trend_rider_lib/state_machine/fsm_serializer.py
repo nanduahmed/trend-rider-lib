@@ -206,8 +206,6 @@ def serialize_uptrend(uptrend: UptrendRecord) -> Dict[str, Any]:
         'ath_date': uptrend.ath_date.isoformat() if uptrend.ath_date else None,
         'distance_from_ath_abs': uptrend.distance_from_ath_abs,
         'distance_from_ath_pct': uptrend.distance_from_ath_pct,
-        'weekly_close_history': _serialize_history(uptrend.weekly_close_history),
-        'daily_close_history': _serialize_history(uptrend.daily_close_history),
         'daily_ema21_history': _serialize_history(uptrend.daily_ema21_history),
         'daily_ema34_history': _serialize_history(uptrend.daily_ema34_history),
         'daily_ema55_history': _serialize_history(uptrend.daily_ema55_history),
@@ -262,8 +260,6 @@ def deserialize_uptrend(data: Dict[str, Any]) -> UptrendRecord:
     record.ath_date = datetime.fromisoformat(data['ath_date']) if data.get('ath_date') else None
     record.distance_from_ath_abs = data.get('distance_from_ath_abs')
     record.distance_from_ath_pct = data.get('distance_from_ath_pct')
-    record.weekly_close_history = _deserialize_history(data.get('weekly_close_history'))
-    record.daily_close_history = _deserialize_history(data.get('daily_close_history'))
     record.daily_ema21_history = _deserialize_history(data.get('daily_ema21_history'))
     record.daily_ema34_history = _deserialize_history(data.get('daily_ema34_history'))
     record.daily_ema55_history = _deserialize_history(data.get('daily_ema55_history'))
