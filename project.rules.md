@@ -76,7 +76,7 @@ Update the design change log section
 *   A user requesting a Pine Script change that affects design must be informed that it is a design change requiring updates across all components
 *   When in doubt, verify with the user
 
-## Library Changes 
+## Library Changes 
 
 When modifying anything to the library, make sure the following
 
@@ -209,9 +209,3 @@ Changes to any of the following require a coordinated update across all componen
 *   It must NOT contain implementation code
 *   It should include formulas where necessary for clarity
 *   All algorithm-level changes must be documented at the **end** of `design.md`
-
-## Changelog
-
-- All meaningful changes MUST include a 1-2 line entry in `CHANGELOG.md`
-- The entry should describe what changed and why, in user-facing terms
-- Group entries by date
