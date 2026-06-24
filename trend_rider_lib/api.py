@@ -148,9 +148,11 @@ def update_stocks(
     config = TrendRiderConfig()
     engine = TrendRiderEngine(config, bridge, bridge, bridge)
 
-    end_dt: Optional[pd.Timestamp] = (
-        pd.Timestamp(end_date) if end_date else None
-    )
+    end_dt: Optional[pd.Timestamp] = None
+    if end_date is not None:
+        end_dt = pd.Timestamp(end_date)
+        if end_dt.tz is None:
+            end_dt = end_dt.tz_localize("Asia/Kolkata")
 
     new_candles: Dict[str, pd.DataFrame] = {}
     for ticker in tickers:
