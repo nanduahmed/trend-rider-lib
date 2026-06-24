@@ -585,6 +585,66 @@ def test_recovering_bullish_crossover_transitions_to_uptrend_without_tr_qualifie
     assert len(buy_entry_signals) == 0
 
 
+def test_trend_metrics_survive_none_histories():
+    """
+    ``record_daily_point`` and ``update_trend_metrics`` must not crash
+    when the EMA history attributes are None (as can happen when an
+    UptrendRecord is reconstructed via ``from_dict`` with missing or
+    null history keys).  The helpers should self-heal by promoting
+    None -> [] and then operate as normal.
+    """
+    uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    uptrend.cycle_id = 1
+    uptrend.first_buy_zone_date = pd.Timestamp("2024-01-01")
+    uptrend.first_buy_zone_price = 100.0
+
+    # Simulate legacy/incomplete deserialized state where histories are None
+    uptrend.daily_ema21_history = None
+    uptrend.daily_ema34_history = None
+    uptrend.daily_ema55_history = None
+
+    # Must not raise
+    record_daily_point(
+        uptrend,
+        pd.Timestamp("2024-01-01"),
+        100.0,
+        95.0,
+        90.0,
+        85.0,
+    )
+
+    # Histories should have self-healed to lists
+    assert isinstance(uptrend.daily_ema21_history, list)
+    assert isinstance(uptrend.daily_ema34_history, list)
+    assert isinstance(uptrend.daily_ema55_history, list)
+    assert len(uptrend.daily_ema21_history) == 1
+
+    # Must not raise on sparsely populated history (no crash, just None values)
+    update_trend_metrics(uptrend, 105.0)
+
+    # With only a single data point, slope/efficiency must be None (needs >=2)
+    assert uptrend.ema21_slope is None
+    assert uptrend.efficiency_ratio is None
+    # ema34/55 spread exists because lists now have 1 entry
+    assert uptrend.ema34_55_spread == pytest.approx(5.0)
+
+    # Re-verify via UptrendRecord.from_dict with missing history keys
+    raw = uptrend.to_dict()
+    del raw["daily_ema21_history"]
+    del raw["daily_ema34_history"]
+    del raw["daily_ema55_history"]
+
+    restored = UptrendRecord.from_dict(raw)
+    assert restored.daily_ema21_history is None
+    assert restored.daily_ema34_history is None
+    assert restored.daily_ema55_history is None
+
+    # Calling metrics on the restored record must still be safe
+    update_trend_metrics(restored, 105.0)
+    assert restored.ema21_slope is None
+    assert restored.efficiency_ratio is None
+
+
 def test_full_recovery_lifecycle_analytics():
     """
     Simulate a full lifecycle: UPTREND → DOWNTREND → RECOVERING (several weeks)

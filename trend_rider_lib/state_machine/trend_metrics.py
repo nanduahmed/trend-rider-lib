@@ -48,6 +48,23 @@ def _efficiency_ratio(points: list[tuple[datetime, float]]) -> Optional[float]:
     return float(numerator / denominator)
 
 
+def _ensure_history_lists(uptrend: UptrendRecord) -> None:
+    """Ensure EMA history attributes are mutable lists.
+
+    ``UptrendRecord.from_dict`` may set the history attributes to ``None``
+    when the serialized data omits them (e.g. legacy or partial incremental
+    state). The trend-metrics helpers rely on slicing/iteration/append, which
+    crash on ``None``. This normalizes ``None`` back to an empty list in place
+    so the record self-heals for subsequent calls.
+    """
+    if uptrend.daily_ema21_history is None:
+        uptrend.daily_ema21_history = []
+    if uptrend.daily_ema34_history is None:
+        uptrend.daily_ema34_history = []
+    if uptrend.daily_ema55_history is None:
+        uptrend.daily_ema55_history = []
+
+
 def record_daily_point(
     uptrend: UptrendRecord,
     date: datetime,
@@ -57,6 +74,7 @@ def record_daily_point(
     ema55: Optional[float],
 ) -> None:
     """Track daily EMA history for active analytics."""
+    _ensure_history_lists(uptrend)
     _append_point(uptrend.daily_ema21_history, date, ema21)
     _append_point(uptrend.daily_ema34_history, date, ema34)
     _append_point(uptrend.daily_ema55_history, date, ema55)
@@ -64,6 +82,8 @@ def record_daily_point(
 
 def update_trend_metrics(uptrend: UptrendRecord, current_close: Optional[float]) -> None:
     """Recompute summary analytics for an active trend record."""
+    _ensure_history_lists(uptrend)
+
     if uptrend.first_buy_zone_price is None:
         return
 

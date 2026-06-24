@@ -10,6 +10,8 @@ from ..core.enums import State, Classification, UptrendStrength, SignalType
 
 
 def _serialize_history(history):
+    if history is None:
+        return []
     return [
         [item[0].isoformat() if item[0] else None, item[1]]
         for item in history
