@@ -173,6 +173,8 @@ class TrendRiderEngine:
                                 row['Close'],
                                 self.config.ema_weekly_period
                             )
+                            # Advance the context EMA state for the next candle
+                            context.last_ema21 = row['EMA21']
 
                         # Compute zone flags for this single row
                         row_df = pd.DataFrame([row])
@@ -191,15 +193,22 @@ class TrendRiderEngine:
                                 row['Close'],
                                 self.config.ema_daily_fast
                             )
+                            # Advance the context EMA state for the next candle
+                            context.last_ema34 = row['EMA34']
                         if context.last_ema55 is not None and 'Close' in row:
                             row['EMA55'] = incremental_ema(
                                 context.last_ema55,
                                 row['Close'],
                                 self.config.ema_daily_slow
                             )
+                            # Advance the context EMA state for the next candle
+                            context.last_ema55 = row['EMA55']
                         fsm.process_daily_candle(row)
 
-                    # Update trades
+                    # TODO [CONSISTENCY]: Trade updates run on every candle here (daily+weekly),
+                    # but run_full_scan only updates on weekly candles. This frequency mismatch
+                    # can produce divergent trade exit dates/PnL between a fresh scan and an
+                    # incremental continuation. Reconcile to weekly-only in both paths.
                     closed_trades = self.trade_manager.update_trades(
                         ticker, idx, row['Close']
                     )

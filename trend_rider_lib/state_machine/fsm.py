@@ -314,8 +314,6 @@ class StockFSM:
             self.context.current_uptrend.pct_closes_above = self.context.closes_above_ema / self.context.uptrend_weeks
             self.context.current_uptrend.strength = self.context.current_uptrend.calculate_strength()
 
-        self._update_extremes(row)
-
         if self.context.current_uptrend.first_buy_zone_date is None and self.is_in_buyzone():
             self._set_first_buy_zone(row)
 
@@ -331,13 +329,6 @@ class StockFSM:
                 {"reason": "Uptrend weeks reached the qualification threshold"},
             )
             self.emit_signal(SignalType.TR_QUALIFIED, row)
-
-        self.context.current_uptrend.num_weeks = self.context.uptrend_weeks
-        self.context.current_uptrend.closes_above_ema = self.context.closes_above_ema
-        self.context.current_uptrend.closes_below_ema = self.context.closes_below_ema
-        if self.context.uptrend_weeks > 0:
-            self.context.current_uptrend.pct_closes_above = self.context.closes_above_ema / self.context.uptrend_weeks
-            self.context.current_uptrend.strength = self.context.current_uptrend.calculate_strength()
 
     def _set_first_buy_zone(self, row: pd.Series) -> None:
         if self.context.current_uptrend is None or self.context.first_buy_zone_date is not None:
