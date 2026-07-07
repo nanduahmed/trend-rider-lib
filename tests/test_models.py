@@ -290,7 +290,6 @@ def test_full_json_persistence_roundtrip():
         closes_above_ema=9,
         closes_below_ema=3,
         is_crossover_detected=True,
-        crossover_price=510.0,
         longName="Netflix Inc",
         sector="Technology",
         industry="Entertainment",
@@ -337,7 +336,6 @@ def test_full_json_persistence_roundtrip():
     assert restored.closes_above_ema == 9
     assert restored.closes_below_ema == 3
     assert restored.is_crossover_detected is True
-    assert restored.crossover_price == 510.0
     assert restored.longName == "Netflix Inc"
     assert restored.sector == "Technology"
     assert restored.industry == "Entertainment"

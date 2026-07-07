@@ -62,8 +62,6 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     closes_below_ema INTEGER,
                     is_buyzone INTEGER,
                     is_crossover_detected INTEGER,
-                    crossover_date TEXT,
-                    crossover_price REAL,
                     classification TEXT,
                     last_ema21 REAL,
                     last_ema34 REAL,
@@ -219,6 +217,9 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
     # ------------------------------------------------------------------
     def save_context(self, context: StockContext) -> None:
         serialized = serialize_context(context)
+        # TODO (NOTE-004): Wrap context save and trend record save in a single
+        # transaction with proper error handling. If _save_trend_records fails,
+        # the context is already partially saved, leaving the DB inconsistent.
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -230,10 +231,10 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                  positive_crossover_price, buy_signal_emitted, last_buy_signal_date,
                  last_buy_signal_type, last_buy_signal_crossover_date, uptrend_start_date,
                  uptrend_weeks, weekly_candle_count, closes_above_ema, closes_below_ema,
-                 is_buyzone, is_crossover_detected, crossover_date, crossover_price,
+                 is_buyzone, is_crossover_detected,
                  classification, last_ema21, last_ema34, last_ema55, last_close,
                  last_updated, context_json, longName, sector, industry, marketCap, website, nextDividendDate, isin)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     context.ticker,
@@ -259,8 +260,6 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     serialized["closes_below_ema"],
                     int(serialized["is_buyzone"]),
                     int(serialized["is_crossover_detected"]),
-                    serialized["crossover_date"],
-                    serialized["crossover_price"],
                     serialized["classification"],
                     serialized["last_ema21"],
                     serialized["last_ema34"],

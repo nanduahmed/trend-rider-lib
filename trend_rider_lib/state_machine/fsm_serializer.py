@@ -74,8 +74,6 @@ def serialize_context(context: StockContext) -> Dict[str, Any]:
         'closes_below_ema': int(context.closes_below_ema),
         'is_buyzone': bool(context.is_buyzone),
         'is_crossover_detected': bool(context.is_crossover_detected),
-        'crossover_date': context.crossover_date.isoformat() if context.crossover_date else None,
-        'crossover_price': context.crossover_price,
         'classification': context.classification.name if isinstance(context.classification, Classification) else context.classification,
         'last_ema21': context.last_ema21,
         'last_ema34': context.last_ema34,
@@ -85,6 +83,7 @@ def serialize_context(context: StockContext) -> Dict[str, Any]:
         'warmup_complete': bool(context.warmup_complete),
         'candle_count': int(context.candle_count),
         'weekly_candle_count': int(context.weekly_candle_count),
+        'recovery_crossover_week': context.recovery_crossover_week.isoformat() if context.recovery_crossover_week else None,
         'current_uptrend': serialize_uptrend(context.current_uptrend) if context.current_uptrend else None,
         'uptrend_history': [serialize_uptrend(u) for u in context.uptrend_history],
         'longName': context.longName,
@@ -132,8 +131,6 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context.closes_below_ema = data.get('closes_below_ema', 0)
     context.is_buyzone = data.get('is_buyzone', False)
     context.is_crossover_detected = data.get('is_crossover_detected', False)
-    context.crossover_date = datetime.fromisoformat(data['crossover_date']) if data.get('crossover_date') else None
-    context.crossover_price = data.get('crossover_price')
     context.classification = Classification[data['classification']] if data.get('classification') else Classification.UNQUALIFIED
     context.last_ema21 = _nan_to_none(data.get('last_ema21'))
     context.last_ema34 = _nan_to_none(data.get('last_ema34'))
@@ -143,6 +140,7 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context.warmup_complete = data.get('warmup_complete', False)
     context.candle_count = data.get('candle_count', 0)
     context.weekly_candle_count = data.get('weekly_candle_count', 0)
+    context.recovery_crossover_week = datetime.fromisoformat(data['recovery_crossover_week']) if data.get('recovery_crossover_week') else None
 
     if data.get('current_uptrend'):
         context.current_uptrend = deserialize_uptrend(data['current_uptrend'])

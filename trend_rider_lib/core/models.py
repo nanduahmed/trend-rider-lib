@@ -254,8 +254,6 @@ class StockContext:
         closes_above_ema: int = 0,
         closes_below_ema: int = 0,
         is_crossover_detected: bool = False,
-        crossover_date: Optional[str] = None,
-        crossover_price: Optional[float] = None,
         longName: Optional[str] = None,
         sector: Optional[str] = None,
         industry: Optional[str] = None,
@@ -282,8 +280,6 @@ class StockContext:
         self.closes_above_ema = closes_above_ema
         self.closes_below_ema = closes_below_ema
         self.is_crossover_detected = is_crossover_detected
-        self.crossover_date = crossover_date
-        self.crossover_price = crossover_price
         self.longName = longName
         self.sector = sector
         self.industry = industry
@@ -306,6 +302,7 @@ class StockContext:
         self.last_update: Optional[datetime] = None
         self.warmup_complete: bool = False
         self.candle_count: int = 0
+        self.recovery_crossover_week: Optional[datetime] = None
         self.current_uptrend: Optional[UptrendRecord] = None
         self.uptrend_history: List[UptrendRecord] = []
         self.classification: Optional[Classification] = None
@@ -326,7 +323,7 @@ class StockContext:
             "first_buy_zone_date", "positive_crossover_date",
             "tr_qualified", "is_buyzone", "uptrend_weeks", "weekly_candle_count",
             "closes_above_ema", "closes_below_ema",
-            "is_crossover_detected", "crossover_date", "crossover_price",
+            "is_crossover_detected",
             "longName", "sector", "industry", "marketCap", "website",
             "nextDividendDate", "isin",
         ):
@@ -408,8 +405,6 @@ class StockContext:
             closes_above_ema=int(d.get("closes_above_ema", 0)),
             closes_below_ema=int(d.get("closes_below_ema", 0)),
             is_crossover_detected=bool(d.get("is_crossover_detected", False)),
-            crossover_date=d.get("crossover_date"),
-            crossover_price=d.get("crossover_price"),
             longName=d.get("longName"),
             sector=d.get("sector"),
             industry=d.get("industry"),
