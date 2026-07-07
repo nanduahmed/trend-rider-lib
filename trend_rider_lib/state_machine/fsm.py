@@ -249,12 +249,11 @@ class StockFSM:
         self.context.positive_crossover_date = None
         self.context.positive_crossover_price = None
         self.context.is_crossover_detected = False
-        self.context.crossover_date = None
-        self.context.crossover_price = None
         self.context.daily_downtrend_trigger_date = None
         self.context.daily_downtrend_trigger_price = None
         self.context.first_buy_zone_date = None
         self.context.first_buy_zone_price = None
+        self.context.recovery_crossover_week = None
         self.context.current_uptrend = UptrendRecord(start_date=row.name)
         self.context.current_uptrend.cycle_id = self.context.trend_cycle_id
         self.context.current_uptrend.start_price = row.get("Close")
@@ -299,6 +298,12 @@ class StockFSM:
             return
 
         if self.context.current_uptrend.start_date is not None and row.name <= self.context.current_uptrend.start_date:
+            return
+
+        # Exclude recovery crossover week: the week in which a bullish crossover
+        # confirmed the recovered uptrend must be excluded from weekly statistics
+        # per design.md Section 1 (Boundary Behaviour).
+        if self.context.recovery_crossover_week is not None and row.name == self.context.recovery_crossover_week:
             return
 
         self.context.uptrend_weeks += 1
@@ -361,8 +366,6 @@ class StockFSM:
         self.context.is_crossover_detected = True
         self.context.positive_crossover_date = row.name
         self.context.positive_crossover_price = row.get("Close")
-        self.context.crossover_date = row.name
-        self.context.crossover_price = row.get("Close")
 
         self._emit_trend_event(
             TrendEventType.DAILY_POSITIVE_CROSSOVER,
@@ -391,6 +394,13 @@ class StockFSM:
             self.context.uptrend_weeks = 0
             self.context.closes_above_ema = 0
             self.context.closes_below_ema = 0
+
+            # Compute the weekly anchor for the crossover date so that the
+            # week containing the crossover day is excluded from weekly
+            # analytics counts per design.md Section 1 (Boundary Behaviour).
+            crossover_week_end = self._compute_week_end(row.name)
+            self.context.recovery_crossover_week = crossover_week_end
+
             if self.context.current_uptrend is not None:
                 if self.context.current_uptrend.start_date is None:
                     self.context.current_uptrend.start_date = row.name
@@ -434,12 +444,16 @@ class StockFSM:
             else:
                 self._set_state(State.ABOVE_BUY_ZONE)
 
+    def _compute_week_end(self, date: pd.Timestamp) -> pd.Timestamp:
+        """Compute the end of the W-FRI week for the given date."""
+        # Use pandas to compute weekly period ending on Friday
+        week_period = date.to_period("W-FRI")
+        return week_period.end_time
+
     def _reset_bullish_crossover_latch(self) -> None:
         self.context.is_crossover_detected = False
         self.context.positive_crossover_date = None
         self.context.positive_crossover_price = None
-        self.context.crossover_date = None
-        self.context.crossover_price = None
         self.context.buy_signal_emitted = False
         self.context.last_buy_signal_crossover_date = None
 
@@ -472,6 +486,7 @@ class StockFSM:
         self.context.buy_signal_emitted = False
         self.context.daily_ema21_cross_date = None
         self.context.daily_ema21_cross_price = None
+        self.context.recovery_crossover_week = None
         self._reset_bullish_crossover_latch()
         self._set_state(State.DOWNTREND)
 

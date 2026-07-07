@@ -572,14 +572,14 @@ def show(
             "Crossover Detected",
             "✓ Yes" if ctx.is_crossover_detected else "✗ No",
         )
-        if ctx.is_crossover_detected and ctx.crossover_date:
+        if ctx.is_crossover_detected and ctx.positive_crossover_date:
             recovery_table.add_row(
                 "Crossover Date",
-                format_report_date(ctx.crossover_date),
+                format_report_date(ctx.positive_crossover_date),
             )
             recovery_table.add_row(
                 "Crossover Price",
-                f"{ctx.crossover_price:,.2f}" if ctx.crossover_price else "—",
+                f"{ctx.positive_crossover_price:,.2f}" if ctx.positive_crossover_price else "—",
             )
         console.print(Panel(recovery_table, title="Recovery Info", expand=False))
         return
