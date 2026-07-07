@@ -1,0 +1,211 @@
+# Trend Rider — Project Rules
+
+## Table of Contents
+
+- [Package Structure](#package-structure)
+- [Module Layout](#module-layout)
+- [Hard Rules](#hard-rules)
+  - [Algorithm Design & Modification Protocol](#algorithm-design--modification-protocol)
+  - [Design Change Classification](#design-change-classification)
+- [Library Changes](#library-changes)
+- [Library](#library)
+- [CLI](#cli)
+- [APP](#app)
+- [Environment](#environment)
+- [Testing](#testing)
+- [Critical Implementation Rules](#critical-implementation-rules)
+  - [Candle Processing Order](#candle-processing-order)
+  - [FSM State Restoration](#fsm-state-restoration)
+  - [Stock tr_qualified Flag](#stock-tr_qualified-flag)
+  - [EMA Calculations](#ema-calculations)
+- [Pine Scripts](#pine-scripts)
+  - [Design Change Protocol for Pine Scripts](#design-change-protocol-for-pine-scripts)
+  - [Rules for Pine Scripts](#rules-for-pine-scripts)
+  - [Buy Zone Marking on Chart Intervals](#buy-zone-marking-on-chart-intervals)
+  - [What Constitutes a Design-Breaking Change](#what-constitutes-a-design-breaking-change)
+- [Documentation](#documentation)
+  - [design.md](#designmd)
+
+---
+
+## Package Structure
+
+Two packages. Strictly separate.
+
+*   `trend_rider_lib/` — logic only
+*   `app/` — App contains a cli app and tkinter app
+*   When user refer `cli app`, change must be made to app/cli.py
+*   When user refers `cli interface`, change must be made to trend_rider_lib/cli.py
+*   When user refers to `app`, he refers to tkinter app in app/app.py
+
+## Module Layout
+
+### trend_rider_lib/
+
+core/ enums.py, config.py, models.py indicators/ resampler.py, ema_engine.py, flag_computer.py state_machine/ fsm.py, stock_context.py, uptrend_record.py, classifier.py, fsm_serializer.py signals/ signal_engine.py, signal_store.py trading/ tsl_engine.py, trade_manager.py, trade_store.py persistence/ interfaces.py, sqlite_provider.py, xlsx_provider.py downloader/ yfinance_downloader.py engine.py
+
+
+## Hard Rules
+
+### Algorithm Design & Modification Protocol
+
+#### **Single Source of Truth**
+
+*   `design.md` is the absolute authority for all algorithm design specifications and clarifications.
+*   Always consult `design.md` before making any modifications to the trend_rider_lib algorithm.
+
+#### **Design Change Workflow**
+
+When a request is made to change the core design of `trend_rider_lib` or the associated Pine Script, adhere to the following sequence:
+
+**Verify Intent**: Ensure the requested update represents an explicit, intentional change to the foundational design. If a user requests a Pine Script change that modifies the design, inform them that it is a design change which must be applied to both library and Pine Scripts.
+
+**Clarify & Confirm**: Discuss and clarify the technical details with the user to align on the approach. Get explicit approval before proceeding with any design change.
+
+**Execute & Document**: Once the user explicitly approves the change:
+
+Apply the same change to **all three** components: `trend_rider_lib`, Pine Script **indicator**, and Pine Script **strategy** (where applicable)
+
+Immediately document the change at the **end** of `design.md`
+
+Update the design change log section
+
+#### **Design Change Classification**
+
+*   Any change to FSM states, transitions, signal definitions, EMA parameters, zone definitions, trade rules, or qualification logic is a **design change**
+*   A user requesting a Pine Script change that affects design must be informed that it is a design change requiring updates across all components
+*   When in doubt, verify with the user
+
+## Library Changes 
+
+When modifying anything to the library, make sure the following
+
+1.  The entire historical scan works fine
+2.  The incremental update must preserve the new changes , The result of current full scan and with the partial incremental update must be similar
+3.  The incremental scan updates all trends analytics, trade open/close status and backtesting results
+
+## Library
+
+*   NO typer, rich, click, or any UI import
+*   NO hardcoded paths or DB strings
+*   NO print() — use logging only
+*   NO reading env vars or config files
+*   All external dependencies injected via constructor
+
+## CLI
+
+*   Absolute imports only: `from trend_rider_lib import ...`
+*   NEVER relative import from library
+*   ZERO business logic — only wiring, display, error handling
+*   All errors: `console.print(...)` + `raise typer.Exit(code=1)`
+*   NEVER `typer.Exit(message=...)` — invalid parameter
+*   NEVER `typer.echo()` for Rich markup — use `console.print()`
+
+## APP
+
+*   App refers to tkinter app.
+*   Absolute imports only: `from trend_rider_lib import ...`
+*   NEVER relative import from library
+*   ZERO business logic — only wiring, display, error handling
+
+---
+
+## Date Format
+
+Every readable date displayed to the user must be in `DD-MM-YYYY` format until explicitly asked to use a different format.
+
+---
+
+## Environment
+
+Always install and execute in venv (check existing .venv)
+
+## Testing
+
+*   No tests must be created at the project root level.
+*   Library tests must go under `tests/`.
+*   App tests must go under `app/tests/`.
+
+## Critical Implementation Rules
+
+### Candle Processing Order
+
+Daily candle MUST be processed before weekly candle on the same date.  
+Enforce with secondary sort key: `daily=0, weekly=1`.
+
+### FSM State Restoration
+
+```python
+# CORRECT
+fsm.machine.set_state(state_name, model=fsm)
+# FORBIDDEN
+fsm.state = state_name
+```
+
+### Stock tr_qualified Flag
+
+`tr_qualified` is a **one-way latch**. Once set to `True`, it must never be set to `False`. This applies to both the Python library and Pine Script implementations. Refer to `design.md` (Section 3. Trend Qualification) for the exact qualification logic.
+
+### EMA Calculations
+
+EMA calculations must follow this priority:
+
+1.  **First choice**: TA-Lib (`talib.EMA`) for all full-history calculations
+2.  **Fallback**: Use the incremental formula only when TA-Lib is not usable in certain cases
+    *   Incremental formula: `EMA_new = close × k + EMA_prev × (1 − k)` where `k = 2/(period+1)`
+
+*   Full history batch calculations must always use TA-Lib
+
+---
+
+## Pine Scripts
+
+The library provides an indicator and a strategy for TradingView platform using Pine Script. These Pine Scripts must be exactly according to the design mentioned in `design.md`.  
+The design of the algorithm, `trend_rider_lib`, and Pine Scripts must have exactly the **same design**.
+
+### Design Change Protocol for Pine Scripts
+
+*   When a change is required in Pine Scripts, the change must be applied to **both** indicator and strategy where applicable
+*   If a user mistakenly asks for a change that affects design, inform them that it is a design change requiring updates to all components (library, indicator, strategy)
+*   After explicit user approval, apply the change consistently across all components
+*   Document the change at the end of `design.md`
+
+### Rules for Pine Scripts
+
+*   All code for Pine Scripts must live in `trading_view/` directory
+    *   `trading_view/indicator/` — for the indicator script
+    *   `trading_view/strategy/` — for the strategy script
+    *   `trading_view/docs/` — for documentation
+*   Pine Scripts must refer to `design.md` for FSM state definitions, transitions, and all design specifications
+*   Refer to `README.md` in `trading_view/docs` for Pine Script specific implementation references
+*   Indicator and strategy must be kept strictly synchronized with each other and with `design.md`
+*   Pine Scripts cannot be tested. They must be committed directly.
+*   No versioning of Pine Scripts is necessary.
+
+### Buy Zone Marking on Chart Intervals
+
+*   Weekly trend qualification and weekly buy-zone state use weekly OHLC and weekly EMA21.
+*   Buy-zone background marking on daily or other non-weekly chart intervals must use the chart interval's own OHLC data directly.
+*   Do not mark a daily or non-weekly chart bar as buy-zone solely from higher-timeframe `request.security` OHLC values. The interval bar being marked must itself be a green candle with close above weekly EMA21 and open at or below `weekly EMA21 * buyZoneMax`.
+*   `request.security` may still be used to obtain higher-timeframe EMA/band context; it must not replace the current interval OHLC test for chart-interval buy-zone marking.
+
+### What Constitutes a Design-Breaking Change
+
+Changes to any of the following require a coordinated update across all components:
+
+*   FSM states or transitions
+*   Signal definitions or trigger conditions
+*   EMA parameters or zone definitions
+*   Trade rules or qualification logic
+*   tr_qualified logic or classification rules
+
+---
+
+## Documentation
+
+### design.md
+
+*   `design.md` must capture **design**. This is the SSoT for entire algorithm
+*   It must NOT contain implementation code
+*   It should include formulas where necessary for clarity
+*   All algorithm-level changes must be documented at the **end** of `design.md`
