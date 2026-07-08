@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
 import queue
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -44,7 +45,7 @@ class ScanTab(ctk.CTkFrame):
             command=self._toggle_date_pickers,
         ).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
 
-        self.start_date_picker = CTkDatePicker(input_frame, label="Start Date")
+        self.start_date_picker = CTkDatePicker(input_frame, label="Start Date", allow_blank=True)
         self.start_date_picker.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=5, pady=2)
 
         self.end_date_picker = CTkDatePicker(input_frame, label="End Date")
@@ -89,9 +90,11 @@ class ScanTab(ctk.CTkFrame):
             return
         # Validate dates only when date range is enabled
         if self.use_date_range.get():
-            if not self.start_date_picker.validate():
+            start_date = self.start_date_picker.get_date()
+            # Allow blank start date (None) – user may want full history
+            if self.start_date_picker.get_date_str() and not self.start_date_picker.validate():
                 return
-            if not self.end_date_picker.validate(other_date=self.start_date_picker.get_date()):
+            if not self.end_date_picker.validate(other_date=start_date):
                 return
 
         # Disable UI while running
@@ -111,20 +114,74 @@ class ScanTab(ctk.CTkFrame):
             args["end_date"] = end_str
         if self.data_file_var.get():
             args["db_path"] = Path(self.data_file_var.get())
-        # debug_csv flag is not applicable to run_scan; omitted
+        if self.debug_var.get():
+            args["debug_csv"] = True
         try:
-            run_scan(**args)
-            self.progress_queue.put("Scan completed successfully.")
+            result = run_scan(**args)
+            # Build success message with CSV links if debug was enabled
+            msg = "Scan completed successfully."
+            if isinstance(result, dict) and result.get("debug_csv_paths"):
+                paths = result["debug_csv_paths"]
+                dir_path = result.get("debug_csv_dir", "")
+                msg = f"Scan completed. {len(paths)} debug CSV(s) generated."
+                self.progress_queue.put(("success_with_csv", msg, paths, dir_path))
+            else:
+                self.progress_queue.put(("success", msg))
         except Exception as exc:  # pragma: no cover – UI surface only
-            self.progress_queue.put(f"Scan failed: {exc}")
+            self.progress_queue.put(("error", f"Scan failed: {exc}"))
 
     def _process_queue(self) -> None:
         try:
             while True:
                 msg = self.progress_queue.get_nowait()
-                self.progress_var.set(msg)
+                if isinstance(msg, tuple):
+                    msg_type = msg[0]
+                    if msg_type == "success_with_csv":
+                        text = msg[1]
+                        csv_paths = msg[2]
+                        csv_dir = msg[3]
+                        self.progress_var.set(text)
+                        # Show CSV links in a frame below progress
+                        self._show_csv_links(csv_paths, csv_dir)
+                    elif msg_type == "success":
+                        self.progress_var.set(msg[1])
+                    elif msg_type == "error":
+                        self.progress_var.set(msg[1])
+                else:
+                    self.progress_var.set(msg)
         except queue.Empty:
             pass
         finally:
             # Re‑schedule after a short delay.
             self.after(200, self._process_queue)
+
+    def _show_csv_links(self, csv_paths: list, csv_dir: str) -> None:
+        """Display clickable links to generated CSV files and their folder."""
+        # Remove any previous CSV links frame
+        for widget in getattr(self, "_csv_links_frame", None) or []:
+            widget.destroy()
+        self._csv_links_frame = []
+
+        links_frame = ctk.CTkFrame(self, fg_color="#F0F8FF")
+        links_frame.pack(fill=tk.X, padx=10, pady=5)
+        self._csv_links_frame.append(links_frame)
+
+        # Link to containing folder
+        if csv_dir:
+            folder_link = ctk.CTkLabel(
+                links_frame, text=f"📁 Open CSV folder: {csv_dir}",
+                text_color="blue", cursor="hand2",
+                font=("Segoe UI", 11, "underline"),
+            )
+            folder_link.pack(anchor=tk.W, padx=5, pady=2)
+            folder_link.bind("<Button-1>", lambda e, d=csv_dir: webbrowser.open(d))
+
+        # Links to individual CSV files
+        for path in csv_paths:
+            csv_link = ctk.CTkLabel(
+                links_frame, text=f"📄 {Path(path).name}",
+                text_color="blue", cursor="hand2",
+                font=("Segoe UI", 11, "underline"),
+            )
+            csv_link.pack(anchor=tk.W, padx=5, pady=1)
+            csv_link.bind("<Button-1>", lambda e, p=path: webbrowser.open(p))

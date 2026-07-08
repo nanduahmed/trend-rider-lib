@@ -60,6 +60,22 @@ def _format_market_cap(value: Optional[float]) -> str:
         return f"₹{value:,.2f}"
 
 
+def _enum_name(value) -> str:
+    """Return only the last part of an enum/string representation.
+
+    For example: ``SignalType.UPTREND_START`` → ``UPTREND_START``
+    Also handles enum objects with a ``.name`` attribute.
+    """
+    if value is None:
+        return "—"
+    if hasattr(value, "name"):
+        return value.name
+    s = str(value)
+    if "." in s:
+        return s.rsplit(".", 1)[-1]
+    return s
+
+
 class DetailWindow(ctk.CTkToplevel):
     """Display full information for a single ticker using grouped sections.
 
@@ -101,6 +117,11 @@ class DetailWindow(ctk.CTkToplevel):
         self.canvas.configure(yscrollcommand=self.vscroll.set)
         self.vscroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # Inner frame that will hold all cards – customtkinter frame
         self.inner = ctk.CTkFrame(self.canvas)
@@ -144,10 +165,12 @@ class DetailWindow(ctk.CTkToplevel):
         self.triggers_tree.pack(fill=tk.BOTH, expand=True)
 
         # -----------------------------------------------------------------
-        # Bottom notebook – keep ttk.Notebook (customtkinter does not provide one)
+        # Bottom notebook inside the scrollable area
         # -----------------------------------------------------------------
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook_card = ctk.CTkFrame(self.inner, corner_radius=10, fg_color="#FFFFFF")
+        self.notebook_card.grid(sticky="ew", padx=8, pady=4)
+        notebook = ttk.Notebook(self.notebook_card)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.signals_frame = ttk.Frame(notebook)
         notebook.add(self.signals_frame, text="Signals")
         self.trades_frame = ttk.Frame(notebook)
@@ -157,7 +180,7 @@ class DetailWindow(ctk.CTkToplevel):
 
         # Signals treeview
         sig_cols = ("ts", "type", "strength", "price")
-        self.sig_tree = ttk.Treeview(self.signals_frame, columns=sig_cols, show="headings")
+        self.sig_tree = ttk.Treeview(self.signals_frame, columns=sig_cols, show="headings", height=6)
         for col in sig_cols:
             self.sig_tree.heading(col, text=col.title())
             anchor = "e" if col in ("strength", "price") else "center"
@@ -166,7 +189,7 @@ class DetailWindow(ctk.CTkToplevel):
 
         # Trades treeview
         tr_cols = ("id", "status", "entry_ts", "exit_ts", "entry_price", "exit_price", "profit_pct")
-        self.tr_tree = ttk.Treeview(self.trades_frame, columns=tr_cols, show="headings")
+        self.tr_tree = ttk.Treeview(self.trades_frame, columns=tr_cols, show="headings", height=6)
         for col in tr_cols:
             self.tr_tree.heading(col, text=col.replace('_', ' ').title())
             anchor = "e" if col in ("entry_price", "exit_price", "profit_pct") else "center"
@@ -177,7 +200,7 @@ class DetailWindow(ctk.CTkToplevel):
         ut_cols = ("cycle_id", "start_date", "end_date", "strength", "num_weeks",
                     "pct_above_ema", "start_price", "end_price", "roc_1w", "roc_3w",
                     "efficiency")
-        self.ut_tree = ttk.Treeview(self.uptrends_frame, columns=ut_cols, show="headings")
+        self.ut_tree = ttk.Treeview(self.uptrends_frame, columns=ut_cols, show="headings", height=6)
         for col in ut_cols:
             self.ut_tree.heading(col, text=col.replace('_', ' ').title())
             anchor = "e" if col in ("num_weeks", "pct_above_ema", "start_price", "end_price",
@@ -248,7 +271,7 @@ class DetailWindow(ctk.CTkToplevel):
             if isinstance(value, bool):
                 _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
             else:
-                ttk.Label(self.state_frame, text=value or "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
+                ttk.Label(self.state_frame, text=_enum_name(value)).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # EMA Indicators
         ema_items = [
@@ -268,7 +291,7 @@ class DetailWindow(ctk.CTkToplevel):
             ("Trend End Date", _format_date(ctx.trend_end_date)),
             ("Uptrend Weeks", ctx.uptrend_weeks),
             ("Uptrend Start", _format_date(ctx.uptrend_start_date)),
-            ("Current Uptrend", str(ctx.current_uptrend) if ctx.current_uptrend else "—"),
+            ("Current Uptrend", _enum_name(ctx.current_uptrend)),
         ]
         for r, (label, value) in enumerate(trend_items):
             ttk.Label(self.trend_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
@@ -294,7 +317,7 @@ class DetailWindow(ctk.CTkToplevel):
         buy_items = [
             ("Signal Emitted", ctx.buy_signal_emitted),
             ("Last Signal Date", _format_date(ctx.last_buy_signal_date)),
-            ("Last Signal Type", ctx.last_buy_signal_type),
+            ("Last Signal Type", _enum_name(ctx.last_buy_signal_type)),
             ("Last Signal Crossover", _format_date(ctx.last_buy_signal_crossover_date)),
         ]
         for r, (label, value) in enumerate(buy_items):
@@ -310,7 +333,7 @@ class DetailWindow(ctk.CTkToplevel):
             ("Candle Count", ctx.candle_count),
             ("Last Close", _format_currency(ctx.last_close)),
             ("Last Update", _format_date(ctx.last_update)),
-            ("Classification", str(ctx.classification) if ctx.classification else "—"),
+            ("Classification", _enum_name(ctx.classification)),
         ]
         for r, (label, value) in enumerate(meta_items):
             ttk.Label(self.meta_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
@@ -322,7 +345,7 @@ class DetailWindow(ctk.CTkToplevel):
     def _populate_signals(self) -> None:
         for sig in self.signals:
             ts = _format_date(getattr(sig, "date", None))
-            typ = getattr(sig, "signal_type", "")
+            typ = _enum_name(getattr(sig, "signal_type", ""))
             strength = _format_number(getattr(sig, "strength", None))
             price = _format_currency(getattr(sig, "close_price", None))
             self.sig_tree.insert("", tk.END, values=(ts, typ, strength, price))
@@ -330,7 +353,7 @@ class DetailWindow(ctk.CTkToplevel):
     def _populate_trades(self) -> None:
         for tr in self.trades:
             tr_id = getattr(tr, "id", "")
-            status = getattr(tr, "status", "")
+            status = _enum_name(getattr(tr, "status", ""))
             entry_ts = _format_date(getattr(tr, "entry_date", None))
             exit_ts = _format_date(getattr(tr, "exit_date", None))
             entry_price = _format_currency(getattr(tr, "entry_price", None))
@@ -348,11 +371,7 @@ class DetailWindow(ctk.CTkToplevel):
             cycle_id = getattr(ut, "cycle_id", "")
             start_date = _format_date(getattr(ut, "start_date", None))
             end_date = _format_date(getattr(ut, "end_date", None))
-            strength = getattr(ut, "strength", None)
-            if hasattr(strength, "name"):
-                strength = strength.name
-            elif strength is None:
-                strength = "—"
+            strength = _enum_name(getattr(ut, "strength", None))
             num_weeks = getattr(ut, "num_weeks", 0)
             pct_above = _format_number(getattr(ut, "pct_closes_above", None), 1)
             start_price = _format_currency(getattr(ut, "start_price", None))
