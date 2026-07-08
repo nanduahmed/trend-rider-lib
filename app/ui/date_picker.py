@@ -53,10 +53,12 @@ class CTkDatePicker(ctk.CTkFrame):
         min_date: datetime | None = None,
         max_date: datetime | None = None,
         enabled: bool = True,
+        allow_blank: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
         self._label_var = tk.StringVar(value=label or "")
+        self._allow_blank = allow_blank
         if label:
             ctk.CTkLabel(self, textvariable=self._label_var).pack(side=tk.LEFT, padx=2)
 
@@ -89,6 +91,23 @@ class CTkDatePicker(ctk.CTkFrame):
         state = "normal" if enabled else "disabled"
         self.date_entry.configure(state=state)
 
+        # Clear button for blankable pickers
+        if allow_blank:
+            self._clear_btn = ctk.CTkButton(
+                self, text="✕", width=24, height=24,
+                fg_color="transparent", text_color="gray",
+                hover_color="#E0E0E0",
+                command=self._clear_date,
+            )
+            self._clear_btn.pack(side=tk.LEFT, padx=1)
+            self._cleared = False
+
+    def _clear_date(self) -> None:
+        """Clear the selected date (set to blank/None)."""
+        self._cleared = True
+        self.date_entry.configure(state="disabled")
+        self._clear_btn.configure(text="↻")  # Show reset icon
+
     # ---------------------------------------------------------------------
     # Event handling
     # ---------------------------------------------------------------------
@@ -116,9 +135,11 @@ class CTkDatePicker(ctk.CTkFrame):
     def get_date(self) -> datetime | None:
         """Return the selected date as a ``datetime`` object or ``None``.
 
-        Returns ``None`` when the picker is disabled.
+        Returns ``None`` when the picker is disabled or has been cleared.
         """
         if not self._enabled:
+            return None
+        if getattr(self, "_cleared", False):
             return None
         try:
             return self.date_entry.get_date()
@@ -128,7 +149,7 @@ class CTkDatePicker(ctk.CTkFrame):
     def get_date_str(self) -> str | None:
         """Return the selected date formatted as ``YYYY‑MM‑DD``.
 
-        Returns ``None`` when the picker is disabled.
+        Returns ``None`` when the picker is disabled or has been cleared.
         """
         dt = self.get_date()
         return dt.strftime("%Y-%m-%d") if dt else None
