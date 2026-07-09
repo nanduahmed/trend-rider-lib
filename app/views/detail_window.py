@@ -253,7 +253,7 @@ class DetailWindow(ctk.CTkToplevel):
             ttk.Label(self.fundamental_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if label == "Website" and value and value != "—":
                 link = ttk.Label(self.fundamental_frame, text=value, foreground="blue", cursor="hand2")
-                link.grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                link.grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
                 link.bind("<Button-1>", lambda e, url=value: webbrowser.open(url))
             else:
                 ttk.Label(self.fundamental_frame, text=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
@@ -269,7 +269,7 @@ class DetailWindow(ctk.CTkToplevel):
         for r, (label, value) in enumerate(state_items):
             ttk.Label(self.state_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             if isinstance(value, bool):
-                _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r, column=1, sticky=tk.W, padx=5, pady=2)
+                _bool_label(self.state_frame, text=("✓" if value else "✗"), value=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
             else:
                 ttk.Label(self.state_frame, text=_enum_name(value)).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
@@ -307,8 +307,6 @@ class DetailWindow(ctk.CTkToplevel):
              _format_currency(getattr(ctx, "first_buy_zone_price", None))),
             ("Positive Crossover", _format_date(ctx.positive_crossover_date),
              _format_currency(getattr(ctx, "positive_crossover_price", None))),
-            ("Crossover", _format_date(ctx.crossover_date),
-             _format_currency(ctx.crossover_price)),
         ]
         for row in trigger_rows:
             self.triggers_tree.insert("", tk.END, values=row)
