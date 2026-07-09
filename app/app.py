@@ -1,17 +1,24 @@
+import logging
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import ttk
+
+from app.settings_manager import SettingsManager, apply_log_level
 
 # Import view modules
 try:
     from app.views.scan_tab import ScanTab
     from app.views.results_tab import ResultsTab
     from app.views.update_tab import UpdateTab
+    from app.views.settings_tab import SettingsTab
 except ImportError as e:
     print(f"Warning: Could not import views: {e}")
     ScanTab = None
     ResultsTab = None
     UpdateTab = None
+    SettingsTab = None
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -23,9 +30,15 @@ def main() -> None:
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 
+    # ── Initialise settings and apply persisted preferences ─────────────────
+    settings_mgr = SettingsManager()
+    saved_level = settings_mgr.log_level
+    apply_log_level(saved_level)
+    logger.info("App started with log level: %s", saved_level)
+
     root = ctk.CTk()
     root.title("Trend Rider Scanner")
-    root.geometry("1024x768")
+    root.geometry("1600x768")
 
     # -----------------------------------------------------------------
     # Sidebar navigation – fixed width, dark background, proper padding
@@ -99,6 +112,19 @@ def main() -> None:
         set_active_button(update_btn)
         current_view["button"] = update_btn
 
+    def show_settings():
+        """Display the Settings tab."""
+        clear_content()
+        if SettingsTab:
+            settings_view = SettingsTab(content_area, settings_manager=settings_mgr)
+            settings_view.pack(fill="both", expand=True, padx=15, pady=15)
+        else:
+            placeholder = ctk.CTkLabel(content_area, text="Settings view not available",
+                                        font=("Segoe UI", 16))
+            placeholder.pack(pady=50)
+        set_active_button(settings_btn)
+        current_view["button"] = settings_btn
+
     # Navigation buttons with proper styling
     scan_btn = ctk.CTkButton(
         nav_frame,
@@ -146,9 +172,24 @@ def main() -> None:
     spacer = ctk.CTkFrame(sidebar, fg_color="transparent")
     spacer.pack(fill="both", expand=True)
 
-    # Bottom section – Export button and connection status
+    # Bottom section – Settings, Export button and connection status
     bottom_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
     bottom_frame.pack(fill="x", padx=20, pady=(10, 20))
+
+    # Settings button
+    settings_btn = ctk.CTkButton(
+        bottom_frame,
+        text="Settings",
+        width=180,
+        height=35,
+        corner_radius=8,
+        fg_color="#374151",  # Gray background
+        text_color="white",
+        font=("Segoe UI", 12),
+        anchor="w",
+        command=show_settings
+    )
+    settings_btn.pack(pady=8)
 
     # Export Data button
     export_btn = ctk.CTkButton(

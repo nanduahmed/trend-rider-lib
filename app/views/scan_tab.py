@@ -34,7 +34,8 @@ class ScanTab(ctk.CTkFrame):
 
         # Tickers (comma‑separated)
         ctk.CTkLabel(input_frame, text="Tickers (comma separated):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-        self.tickers_entry = ctk.CTkEntry(input_frame, width=500)
+        self.tickers_entry = ctk.CTkEntry(input_frame, width=500, placeholder_text="POLYCAB.NS")
+        self.tickers_entry.insert(0, "TIINDIA.NS")
         self.tickers_entry.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
 
         self.use_date_range = tk.BooleanVar(value=True)
