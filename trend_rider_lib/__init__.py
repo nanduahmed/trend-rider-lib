@@ -33,7 +33,7 @@ from .trading import TradeManager, TSLEngine
 from .persistence import SQLiteProvider, IStateStore, ISignalStore, ITradeStore
 from .persistence.scan_handler import IScanResultHandler, BridgeProvider
 from .downloader import YFinanceDownloader
-from .api import scan_stocks
+from .api import scan_stocks, update_stocks
 
 __version__ = "0.3.6"
 
@@ -76,6 +76,7 @@ __all__ = [
     "BridgeProvider",
     # Public API
     "scan_stocks",
+    "update_stocks",
     # Downloader
     "YFinanceDownloader",
 ]
