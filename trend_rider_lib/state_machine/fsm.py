@@ -3,6 +3,7 @@ State machine for stock trend analysis.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Callable, Optional
 
 import pandas as pd
@@ -37,6 +38,7 @@ class StockFSM:
         self.config = config
         self.context = StockContext(ticker=ticker)
         self.context.classification = Classification.UNQUALIFIED
+        self.context.current_state = State.WARMUP
         self.signal_callback = signal_callback
         self.event_callback = event_callback
         self._current_row: Optional[pd.Series] = None
@@ -559,6 +561,23 @@ class StockFSM:
         )
         self.event_callback(event)
 
+    @staticmethod
+    def _to_isoformat(value) -> Optional[str]:
+        """Safely convert a datetime or compatible value to ISO format string."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        # Handle string values (e.g., from legacy database entries or failed deserialization)
+        if isinstance(value, str):
+            try:
+                # Handle space-separated ISO format (e.g., '2018-07-06 00:00:00+05:30')
+                parsed = datetime.fromisoformat(value.replace(' ', 'T'))
+                return parsed.isoformat()
+            except (ValueError, TypeError):
+                return value
+        return None
+
     def _build_signal_metadata(self, signal_type: SignalType, row: Optional[pd.Series]) -> dict:
         reason_map = {
             SignalType.UPTREND_START: "Weekly close confirmed the official trend start",
@@ -580,10 +599,10 @@ class StockFSM:
             "tr_qualified": self.context.tr_qualified,
             "is_buyzone": self.context.is_buyzone,
             "is_crossover_detected": self.context.is_crossover_detected,
-            "trend_start_date": self.context.trend_start_date.isoformat() if self.context.trend_start_date else None,
-            "trend_end_date": self.context.trend_end_date.isoformat() if self.context.trend_end_date else None,
-            "first_buy_zone_date": self.context.first_buy_zone_date.isoformat() if self.context.first_buy_zone_date else None,
-            "daily_ema21_cross_date": self.context.daily_ema21_cross_date.isoformat() if self.context.daily_ema21_cross_date else None,
+            "trend_start_date": self._to_isoformat(self.context.trend_start_date),
+            "trend_end_date": self._to_isoformat(self.context.trend_end_date),
+            "first_buy_zone_date": self._to_isoformat(self.context.first_buy_zone_date),
+            "daily_ema21_cross_date": self._to_isoformat(self.context.daily_ema21_cross_date),
         }
 
         source = row if row is not None else self._current_row

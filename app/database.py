@@ -1,10 +1,24 @@
-import sqlite3
 import json
+import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime
 
 from trend_rider_lib.core.models import StockContext, SignalEvent, TradeRecord, context_from_dict
+
+
+class _DatetimeEncoder(json.JSONEncoder):
+    """JSON encoder that serialises datetime objects to ISO 8601 with 'T'.
+
+    Falls back to ``str()`` for any other non-serialisable type (e.g. enums)
+    so that the behaviour matches the previous ``default=str`` approach while
+    still producing ISO 8601 for datetimes.
+    """
+
+    def default(self, o):
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return str(o)
 
 
 class Database:
@@ -54,7 +68,7 @@ class Database:
 
     # ---------- Context ----------
     def save_context(self, context: StockContext) -> None:
-        data = json.dumps(context.to_dict(), default=str)
+        data = json.dumps(context.to_dict(), cls=_DatetimeEncoder)
         ts = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute(
@@ -98,7 +112,7 @@ class Database:
 
     # ---------- Signals ----------
     def save_signal(self, ticker: str, signal: SignalEvent) -> None:
-        data = json.dumps(signal.__dict__, default=str)
+        data = json.dumps(signal.__dict__, cls=_DatetimeEncoder)
         ts = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute(
@@ -128,7 +142,7 @@ class Database:
 
     # ---------- Trades ----------
     def save_trade(self, trade: TradeRecord) -> None:
-        data = json.dumps(trade.__dict__, default=str)
+        data = json.dumps(trade.__dict__, cls=_DatetimeEncoder)
         ts = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         cur.execute(
