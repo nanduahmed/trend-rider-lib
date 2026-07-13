@@ -39,6 +39,24 @@ def _deserialize_history(data):
     return history
 
 
+def _str_to_bool(value) -> bool:
+    """Robustly convert a value to bool, handling string representations.
+
+    Handles common cases where JSON stores booleans as Python strings
+    (e.g. ``"False"``, ``"True"``, ``"0"``) instead of proper JSON
+    ``true``/``false``. Returns ``False`` for ``None``.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        return value.lower() not in ('false', '0', 'no', '')
+    return bool(value)
+
+
 def serialize_context(context: StockContext) -> Dict[str, Any]:
     """
     Serialize StockContext to dictionary for persistence.
@@ -109,7 +127,7 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context = StockContext(ticker=data['ticker'])
 
     context.current_state = State[data['current_state']] if data.get('current_state') else State.WARMUP
-    context.tr_qualified = data.get('tr_qualified', False)
+    context.tr_qualified = _str_to_bool(data.get('tr_qualified', False))
     context.trend_start_date = datetime.fromisoformat(data['trend_start_date']) if data.get('trend_start_date') else None
     context.trend_end_date = datetime.fromisoformat(data['trend_end_date']) if data.get('trend_end_date') else None
     context.daily_ema21_cross_date = datetime.fromisoformat(data['daily_ema21_cross_date']) if data.get('daily_ema21_cross_date') else None
@@ -129,7 +147,7 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context.uptrend_weeks = data.get('uptrend_weeks', 0)
     context.closes_above_ema = data.get('closes_above_ema', 0)
     context.closes_below_ema = data.get('closes_below_ema', 0)
-    context.is_buyzone = data.get('is_buyzone', False)
+    context.is_buyzone = _str_to_bool(data.get('is_buyzone', False))
     context.is_crossover_detected = data.get('is_crossover_detected', False)
     context.classification = Classification[data['classification']] if data.get('classification') else Classification.UNQUALIFIED
     context.last_ema21 = _nan_to_none(data.get('last_ema21'))

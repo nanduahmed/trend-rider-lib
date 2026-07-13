@@ -380,6 +380,9 @@ class StockContext:
         Handles nested UptrendRecord lists, enum values, and datetime strings.
         This is the inverse of ``to_dict()``.
         """
+        # Lazy import to avoid circular dependency: fsm_serializer imports StockContext
+        from ..state_machine.fsm_serializer import _str_to_bool
+
         # Build with constructor fields only
         current_state = d.get("current_state")
         # Backward-compat: handle old data where State enum was serialized as
@@ -398,8 +401,8 @@ class StockContext:
             daily_downtrend_trigger_date=d.get("daily_downtrend_trigger_date"),
             first_buy_zone_date=d.get("first_buy_zone_date"),
             positive_crossover_date=d.get("positive_crossover_date"),
-            tr_qualified=bool(d.get("tr_qualified", False)),
-            is_buyzone=bool(d.get("is_buyzone", False)),
+            tr_qualified=_str_to_bool(d.get("tr_qualified", False)),
+            is_buyzone=_str_to_bool(d.get("is_buyzone", False)),
             uptrend_weeks=int(d.get("uptrend_weeks", 0)),
             weekly_candle_count=int(d.get("weekly_candle_count", 0)),
             closes_above_ema=int(d.get("closes_above_ema", 0)),
