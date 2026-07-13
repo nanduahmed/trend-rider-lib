@@ -27,10 +27,9 @@ def load_raw_ohlcv(ticker: str, timeframe: str, data_dir: Path) -> pd.DataFrame:
 
 
 def load_calculated_csv(ticker: str, timeframe: str, data_dir: Path) -> pd.DataFrame:
-    """Load pre-calculated StockContext CSV."""
+    """Load pre-calculated StockContext CSV (ISO 8601 date format)."""
     path = data_dir / f"{ticker}_{timeframe}_calculated.csv"
-    df = pd.read_csv(path, parse_dates=["Date"], dayfirst=True)
-    df["Date"] = df["Date"].dt.tz_localize(None)
+    df = pd.read_csv(path, parse_dates=["Date"])
     return df
 
 
