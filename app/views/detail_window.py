@@ -291,7 +291,7 @@ class DetailWindow(ctk.CTkToplevel):
             ("Trend End Date", _format_date(ctx.trend_end_date)),
             ("Uptrend Weeks", ctx.uptrend_weeks),
             ("Uptrend Start", _format_date(ctx.uptrend_start_date)),
-            ("Current Uptrend", _enum_name(ctx.current_uptrend)),
+            ("Current Uptrend", _enum_name(ctx.current_uptrend.strength) if ctx.current_uptrend else "—"),
         ]
         for r, (label, value) in enumerate(trend_items):
             ttk.Label(self.trend_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
