@@ -118,7 +118,8 @@ class TrendRiderEngine:
     def run_incremental_update(
         self,
         tickers: List[str],
-        new_candles: Dict[str, pd.DataFrame]
+        new_candles: Dict[str, pd.DataFrame],
+        debug_callback: Optional[Callable[[str, pd.DataFrame], None]] = None
     ) -> Dict[str, StockContext]:
         """
         Run incremental update with new candles.
@@ -127,6 +128,8 @@ class TrendRiderEngine:
             tickers: List of stock symbols
             new_candles: Dictionary of ticker → new candle DataFrame
                         Can contain daily and/or weekly candles
+            debug_callback: Optional callable ``fn(ticker, pd.DataFrame)`` for
+                           raw incremental debug rows (same format as full scan)
 
         Returns:
             Dictionary of ticker → updated StockContext
@@ -145,6 +148,8 @@ class TrendRiderEngine:
             # Restore FSM with loaded context
             fsm = self._restore_fsm(ticker, context)
 
+            debug_rows = [] if debug_callback else None
+
             if ticker in new_candles:
                 raw_df = new_candles[ticker].copy()
 
@@ -162,8 +167,18 @@ class TrendRiderEngine:
 
                 new_df = raw_df
 
+                # Capture emitted signals for debug rows
+                inc_debug_signals: List[SignalEvent] = []
+                original_signal_callback = fsm.signal_callback
+                def _debug_signal_wrapper(signal: SignalEvent):
+                    inc_debug_signals.append(signal)
+                    original_signal_callback(signal)
+                fsm.signal_callback = _debug_signal_wrapper
+
                 # Process new candles in order
                 for idx, row in new_df.iterrows():
+                    inc_debug_signals.clear()
+                    state_before = fsm.state
                     if row.get('timeframe') == 'weekly':
                         # Work on an explicit copy so mutation intent is clear
                         row = row.copy()
@@ -193,17 +208,18 @@ class TrendRiderEngine:
                                 row['Close'],
                                 self.config.ema_daily_fast
                             )
-                            # Advance the context EMA state for the next candle
-                            context.last_ema34 = row['EMA34']
                         if context.last_ema55 is not None and 'Close' in row:
                             row['EMA55'] = incremental_ema(
                                 context.last_ema55,
                                 row['Close'],
                                 self.config.ema_daily_slow
                             )
-                            # Advance the context EMA state for the next candle
-                            context.last_ema55 = row['EMA55']
+
                         fsm.process_daily_candle(row)
+
+                        # Advance context EMAs after FSM has read previous values
+                        context.last_ema34 = row['EMA34']
+                        context.last_ema55 = row['EMA55']
 
                     # TODO [CONSISTENCY]: Trade updates run on every candle here (daily+weekly),
                     # but run_full_scan only updates on weekly candles. This frequency mismatch
@@ -215,6 +231,22 @@ class TrendRiderEngine:
                     for trade in closed_trades:
                         self.trade_store.update_trade(trade)
 
+                    if debug_rows is not None:
+                        debug_rows.append(
+                            self._build_debug_row(
+                                ticker=ticker,
+                                candle_date=idx,
+                                row=row,
+                                state_before=state_before,
+                                state_after=fsm.state,
+                                context=fsm.context,
+                                emitted_signals=inc_debug_signals,
+                            )
+                        )
+
+                # Restore original signal callback
+                fsm.signal_callback = original_signal_callback
+
             # Update classification
             update_classification(fsm.context)
 
@@ -224,6 +256,10 @@ class TrendRiderEngine:
             context.marketCap = ticker_info.get("marketCap")
             self.state_store.save_context(context)
             results[ticker] = context
+
+            # Emit debug rows if callback provided
+            if debug_callback and debug_rows is not None:
+                debug_callback(ticker, pd.DataFrame(debug_rows))
 
         return results
 
