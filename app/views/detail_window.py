@@ -143,14 +143,14 @@ class DetailWindow(ctk.CTkToplevel):
         self.fundamental_frame = make_card(self.inner, "Fundamental Identity")
         self.state_frame = make_card(self.inner, "Current State & Status")
         self.ema_frame = make_card(self.inner, "EMA Indicators")
+        self.meta_frame = make_card(self.inner, "Candle & Update Metadata")
         self.trend_frame = make_card(self.inner, "Trend Information")
         self.triggers_frame = make_card(self.inner, "Key Date & Price Triggers")
         self.buy_signal_frame = make_card(self.inner, "Buy Signal Information")
-        self.meta_frame = make_card(self.inner, "Candle & Update Metadata")
 
         # Grid helper for label/value pairs (2 columns)
         for frame in [self.fundamental_frame, self.state_frame, self.ema_frame,
-                      self.trend_frame, self.buy_signal_frame, self.meta_frame]:
+                      self.meta_frame, self.trend_frame, self.buy_signal_frame]:
             frame.columnconfigure(0, weight=1, minsize=150)
             frame.columnconfigure(1, weight=2, minsize=200)
 
@@ -223,8 +223,8 @@ class DetailWindow(ctk.CTkToplevel):
     def _relayout_sections(self, columns: int) -> None:
         """Place card frames into a responsive grid."""
         frames = [self.fundamental_frame, self.state_frame, self.ema_frame,
-                  self.trend_frame, self.triggers_frame, self.buy_signal_frame,
-                  self.meta_frame]
+                  self.meta_frame, self.trend_frame, self.triggers_frame,
+                  self.buy_signal_frame]
         # Reset column configuration for the inner frame
         for c in range(columns):
             self.inner.columnconfigure(c, weight=1, uniform="col", minsize=350)
@@ -329,13 +329,35 @@ class DetailWindow(ctk.CTkToplevel):
         meta_items = [
             ("Weekly Candle Count", ctx.weekly_candle_count),
             ("Candle Count", ctx.candle_count),
-            ("Last Close", _format_currency(ctx.last_close)),
             ("Last Update", _format_date(ctx.last_update)),
             ("Classification", _enum_name(ctx.classification)),
         ]
         for r, (label, value) in enumerate(meta_items):
             ttk.Label(self.meta_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             ttk.Label(self.meta_frame, text=value if value is not None else "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Last Close row with EMA21 percentage difference
+        r = len(meta_items)
+        close_val = ctx.last_close
+        ema21_val = ctx.last_ema21
+        close_text = _format_currency(close_val)
+        pct_str = ""
+        fg = None
+        if close_val is not None and ema21_val is not None and ema21_val != 0:
+            pct = (close_val - ema21_val) / ema21_val * 100
+            sign = "+" if pct >= 0 else ""
+            pct_str = f" ({sign}{pct:.2f}%)"
+            if pct < 0:
+                fg = "red"
+            elif pct <= 5:
+                fg = "green"
+            else:
+                fg = "#333333"
+        ttk.Label(self.meta_frame, text="Last Close:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
+        val_label = ttk.Label(self.meta_frame, text=close_text + pct_str)
+        if fg:
+            val_label.configure(foreground=fg)
+        val_label.grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
     # ---------------------------------------------------------------------
     # Populate Signals and Trades tables – unchanged logic
