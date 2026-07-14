@@ -104,11 +104,29 @@ class SettingsManager:
 def apply_log_level(level_name: str) -> None:
     """Apply the given logging level to the root logger and all existing loggers.
 
+    Also adds a StreamHandler to the root logger if none exists, so log
+    messages are output to stderr/terminal.
+
     Args:
         level_name: One of DEBUG, INFO, WARNING, ERROR, CRITICAL.
     """
+    import sys
+
     level = LOG_LEVEL_MAP.get(level_name, logging.INFO)
-    logging.getLogger().setLevel(level)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Add a StreamHandler to output to terminal if none is attached
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(level)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
+
     # Also update all existing loggers so the change takes effect immediately
     for name in logging.root.manager.loggerDict:  # type: ignore[union-attr]
         logging.getLogger(name).setLevel(level)
