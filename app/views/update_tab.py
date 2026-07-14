@@ -62,6 +62,17 @@ class UpdateTab(ctk.CTkFrame):
         self.ticker_scroll = ctk.CTkScrollableFrame(selection_frame, height=180)
         self.ticker_scroll.pack(fill=tk.X, padx=5, pady=(0, 5))
 
+        # ----- Options section --------------------------------------------------
+        options_frame = ctk.CTkFrame(self)
+        options_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.debug_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            options_frame,
+            text="Generate debug CSV",
+            variable=self.debug_var,
+        ).pack(side=tk.LEFT, padx=5, pady=5)
+
         # ----- End date section -------------------------------------------------
         date_frame = ctk.CTkFrame(self)
         date_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -189,9 +200,12 @@ class UpdateTab(ctk.CTkFrame):
         self.progress_queue.put(f"Starting incremental update for {len(tickers)} ticker(s)")
         if end_date:
             self.progress_queue.put(f"End date: {end_date}")
+        debug_csv = self.debug_var.get()
+        if debug_csv:
+            self.progress_queue.put("Debug CSV generation enabled")
 
         try:
-            results, skipped = run_update(tickers, end_date=end_date)
+            results, skipped = run_update(tickers, end_date=end_date, debug_csv=debug_csv)
 
             for ticker in skipped:
                 self.progress_queue.put(f"  {ticker} ⏭ Skipped – no saved context")
