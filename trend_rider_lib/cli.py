@@ -3,6 +3,8 @@ Trend Rider command line interface.
 """
 from __future__ import annotations
 
+import logging
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,6 +28,19 @@ from trend_rider_lib.reporting.export_utils import (
     write_debug_csv,
     write_excel_workbook,
 )
+
+# ── Logging setup ─────────────────────────────────────────────────────────────
+if not logging.getLogger().handlers:
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setLevel(logging.INFO)
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logging.getLogger().addHandler(_handler)
+logging.getLogger().setLevel(logging.INFO)
+# ────────────────────────────────────────────────────────────────────────────────
+
 
 app = typer.Typer(help="Trend Rider command line interface")
 console = Console()

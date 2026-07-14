@@ -123,6 +123,7 @@ def update_stocks(
     existing_contexts: Dict[str, StockContext],
     existing_trades: Dict[str, List[TradeRecord]],
     end_date: Optional[str] = None,
+    debug_callback: Optional[Callable[[str, pd.DataFrame], None]] = None,
 ) -> Dict[str, StockContext]:
     """Run an incremental update for saved tickers.
 
@@ -147,6 +148,9 @@ def update_stocks(
     end_date:
         Optional cutoff date (YYYY-MM-DD).  Only candles on or before
         this date are processed.  Omit to process all available new data.
+    debug_callback:
+        Optional callable ``fn(ticker, pd.DataFrame)`` for raw incremental
+        debug rows (same format as full scan).
 
     Returns
     -------
@@ -242,7 +246,11 @@ def update_stocks(
             new_candles[ticker] = merged
 
         if new_candles:
-            inc_results = engine.run_incremental_update(list(new_candles.keys()), new_candles)
+            inc_results = engine.run_incremental_update(
+                list(new_candles.keys()),
+                new_candles,
+                debug_callback=debug_callback,
+            )
             for ticker, ctx in inc_results.items():
                 handler.on_ticker_completed(ticker, ctx)
             results.update(inc_results)
