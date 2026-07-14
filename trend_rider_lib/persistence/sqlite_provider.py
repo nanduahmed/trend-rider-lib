@@ -266,7 +266,7 @@ class SQLiteProvider(IStateStore, ISignalStore, ITradeStore):
                     serialized["last_ema55"],
                     serialized["last_close"],
                     serialized["last_update"],
-                    json.dumps(serialized, default=str),
+                    json.dumps(serialized),
                     context.longName,
                     context.sector,
                     context.industry,
