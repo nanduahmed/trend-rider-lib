@@ -285,6 +285,23 @@ class DetailWindow(ctk.CTkToplevel):
             ttk.Label(self.ema_frame, text=f"{label}:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
             ttk.Label(self.ema_frame, text=value if value is not None else "—").grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
+        # EMA34 vs EMA55 spread row
+        r = len(ema_items)
+        ema34_val = ctx.last_ema34
+        ema55_val = ctx.last_ema55
+        spread_text = "—"
+        fg = None
+        if ema34_val is not None and ema55_val is not None and ema55_val != 0:
+            pct = (ema34_val - ema55_val) / ema55_val * 100
+            sign = "+" if pct >= 0 else ""
+            spread_text = f"{sign}{pct:.2f}%"
+            fg = "green" if pct >= 0 else "red"
+        ttk.Label(self.ema_frame, text="EMA34 vs EMA55 Spread:").grid(row=r+1, column=0, sticky=tk.W, padx=5, pady=2)
+        val_label = ttk.Label(self.ema_frame, text=spread_text)
+        if fg:
+            val_label.configure(foreground=fg)
+        val_label.grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
+
         # Trend Information
         trend_items = [
             ("Trend Start Date", _format_date(ctx.trend_start_date)),
