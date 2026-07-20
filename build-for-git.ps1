@@ -20,6 +20,11 @@
 .PARAMETER SkipTests
     If set, skips running pytest entirely.
 
+.PARAMETER CheckVersion
+    If set, displays the current version from all three files (pyproject.toml,
+    trend_rider_lib/__init__.py, setup.py), validates they are consistent, and
+    exits without performing any other actions.
+
 .EXAMPLE
     .\build-for-git.ps1
     Patch bump (0.3.1 to 0.3.2).
@@ -31,6 +36,10 @@
 .EXAMPLE
     .\build-for-git.ps1 -BumpType major -SkipTests
     Major bump (0.3.1 to 1.0.0), skip tests.
+
+.EXAMPLE
+    .\build-for-git.ps1 -CheckVersion
+    Display current version from all three files and validate consistency.
 #>
 
 [CmdletBinding()]
@@ -43,7 +52,10 @@ param(
     [switch]$SkipGitChecks,
 
     [Parameter()]
-    [switch]$SkipTests
+    [switch]$SkipTests,
+
+    [Parameter()]
+    [switch]$CheckVersion
 )
 
 Set-StrictMode -Version Latest
@@ -89,6 +101,57 @@ $RepoRoot = (Get-Item $PSScriptRoot).FullName
 Set-Location $RepoRoot
 
 Write-Host "Repository root: $RepoRoot" -ForegroundColor Gray
+
+# ------------------------------------------------------------------------------
+# 0.5 -- Version check (early exit if -CheckVersion is set)
+# ------------------------------------------------------------------------------
+if ($CheckVersion) {
+    Write-Step "0.5/7 -- Version check"
+
+    # Read version from pyproject.toml
+    $pyproject = Get-Content 'pyproject.toml' -Raw
+    $ppMatch = [regex]::Match($pyproject, 'version\s*=\s*"(\d+\.\d+\.\d+)"')
+    $ppVersion = if ($ppMatch.Success) { $ppMatch.Groups[1].Value } else { 'NOT FOUND' }
+
+    # Read version from trend_rider_lib/__init__.py
+    $initContent = Get-Content 'trend_rider_lib/__init__.py' -Raw
+    $initMatch = [regex]::Match($initContent, '__version__\s*=\s*["''](\d+\.\d+\.\d+)["'']')
+    $initVersion = if ($initMatch.Success) { $initMatch.Groups[1].Value } else { 'NOT FOUND' }
+
+    # Read version from setup.py
+    $setupContent = Get-Content 'setup.py' -Raw
+    $setupMatch = [regex]::Match($setupContent, 'version\s*=\s*["''](\d+\.\d+\.\d+)["'']')
+    $setupVersion = if ($setupMatch.Success) { $setupMatch.Groups[1].Value } else { 'NOT FOUND' }
+
+    # Display versions
+    Write-Host ""
+    Write-Host "  pyproject.toml             $ppVersion" -ForegroundColor Gray
+    Write-Host "  trend_rider_lib/__init__.py $initVersion" -ForegroundColor Gray
+    Write-Host "  setup.py                   $setupVersion" -ForegroundColor Gray
+    Write-Host ""
+
+    # Check consistency
+    $allMatch = ($ppVersion -eq $initVersion) -and ($initVersion -eq $setupVersion) -and ($ppVersion -ne 'NOT FOUND')
+    if ($allMatch) {
+        Write-Host "[PASS] All three files have the same version: $ppVersion" -ForegroundColor Green
+    } else {
+        Write-Warn "Version mismatch detected:"
+        if ($ppVersion -ne $initVersion) {
+            Write-Host "  pyproject.toml:              $ppVersion" -ForegroundColor Yellow
+            Write-Host "  trend_rider_lib/__init__.py: $initVersion  <- differs" -ForegroundColor Yellow
+        }
+        if ($ppVersion -ne $setupVersion) {
+            Write-Host "  pyproject.toml:              $ppVersion" -ForegroundColor Yellow
+            Write-Host "  setup.py:                    $setupVersion  <- differs" -ForegroundColor Yellow
+        }
+        if ($initVersion -ne $setupVersion -and $initVersion -eq $ppVersion) {
+            Write-Host "  trend_rider_lib/__init__.py: $initVersion" -ForegroundColor Yellow
+            Write-Host "  setup.py:                    $setupVersion  <- differs" -ForegroundColor Yellow
+        }
+    }
+
+    exit 0
+}
 
 # ------------------------------------------------------------------------------
 # 1 -- Pre-flight validation
