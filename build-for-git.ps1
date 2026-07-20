@@ -41,7 +41,6 @@
     .\build-for-git.ps1 -CheckVersion
     Display current version from all three files and validate consistency.
 #>
-
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -86,6 +85,73 @@ function Assert-Executable([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         Write-ErrorExit "'$Name' is not available in PATH. Aborting."
     }
+}
+
+function Test-SshAuth {
+    # Lightweight, non-destructive test: try to list remote HEAD
+    # 2>$null discards stderr (e.g. "Permission denied") without PowerShell error records
+    # Out-Null discards stdout (the HEAD ref line on success)
+    git ls-remote origin HEAD | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
+function Ensure-SshAuth {
+    # Ensure Git uses the Windows-native OpenSSH client (not a third-party one like
+    # Git Bash's ssh.exe) so that ssh-agent integration works reliably on Windows.
+    $env:GIT_SSH = "C:\Windows\System32\OpenSSH\ssh.exe"
+
+    if (Test-SshAuth) {
+        Write-Host "[PASS] Git SSH authentication to origin works" -ForegroundColor Green
+        return
+    }
+
+    Write-Host "Git SSH authentication failed. Checking SSH agent..." -ForegroundColor Yellow
+
+    # Check if ssh-agent is running
+    $agentService = Get-Service ssh-agent -ErrorAction SilentlyContinue
+    if (-not $agentService -or $agentService.Status -ne 'Running') {
+        Write-Host ""
+        Write-Host "ERROR: SSH agent is not running." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "To fix, run the following commands in an elevated PowerShell:" -ForegroundColor Yellow
+        Write-Host "  Set-Service ssh-agent -StartupType Automatic" -ForegroundColor White
+        Write-Host "  Start-Service ssh-agent" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Then add your SSH key:" -ForegroundColor Yellow
+        Write-Host "  ssh-add `$env:USERPROFILE\.ssh\id_ed25519" -ForegroundColor White
+        Write-Host ""
+        Write-ErrorExit "SSH agent is not running. See instructions above."
+    }
+
+    # Agent is running, check if any keys are loaded
+    ssh-add -l 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "ERROR: SSH agent is running but no keys are loaded." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "To fix, add your SSH key:" -ForegroundColor Yellow
+        Write-Host "  ssh-add `$env:USERPROFILE\.ssh\id_ed25519" -ForegroundColor White
+        Write-Host ""
+        Write-Host "If your key is at a different path, use that path instead." -ForegroundColor Yellow
+        Write-Host ""
+        Write-ErrorExit "No SSH keys loaded in agent. See instructions above."
+    }
+
+    # Keys are loaded but auth still failed — likely the wrong key or not added to GitHub
+    Write-Host ""
+    Write-Host "ERROR: SSH agent has keys loaded but authentication to GitHub still failed." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Possible causes:" -ForegroundColor Yellow
+    Write-Host "  1. Your SSH key is not added to your GitHub account" -ForegroundColor White
+    Write-Host "  2. You are using the wrong SSH key" -ForegroundColor White
+    Write-Host "  3. The remote URL is incorrect" -ForegroundColor White
+    Write-Host ""
+    Write-Host "To troubleshoot:" -ForegroundColor Yellow
+    Write-Host "  1. Test manually: ssh -T git@github.com" -ForegroundColor White
+    Write-Host "  2. List loaded keys: ssh-add -l" -ForegroundColor White
+    Write-Host "  3. Add your key to GitHub: https://github.com/settings/keys" -ForegroundColor White
+    Write-Host ""
+    Write-ErrorExit "SSH authentication to GitHub failed. See instructions above."
 }
 
 # ------------------------------------------------------------------------------
@@ -152,6 +218,12 @@ if ($CheckVersion) {
 
     exit 0
 }
+
+# ------------------------------------------------------------------------------
+# 0.6 -- Git authentication check
+# ------------------------------------------------------------------------------
+Write-Step "0.6/7 -- Git authentication check"
+Ensure-SshAuth
 
 # ------------------------------------------------------------------------------
 # 1 -- Pre-flight validation
