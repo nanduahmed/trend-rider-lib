@@ -196,20 +196,25 @@ switch ($BumpType) {
 $newVersion = "$major.$minor.$patch"
 Write-Host "New version: $newVersion" -ForegroundColor Green
 
-# Check that tag doesn't already exist locally or remotely
+# Check that tag doesn't already exist locally
 $tagName = "v$newVersion"
 $tagExistsLocally = git tag --list "$tagName" 2>&1
 if ($tagExistsLocally) {
     Write-ErrorExit "Tag '$tagName' already exists locally."
 }
-# Fetch remote tags and check
+Write-Host "[PASS] Tag '$tagName' does not exist locally" -ForegroundColor Green
+
+# Check remote tag existence (warn on failure — non-interactive git may not have credentials)
 git fetch origin --tags 2>&1
-if ($LASTEXITCODE -ne 0) { Write-ErrorExit "git fetch origin --tags failed." }
-$tagExistsRemotely = git tag --list "$tagName" 2>&1
-if ($tagExistsRemotely) {
-    Write-ErrorExit "Tag '$tagName' already exists on remote."
+if ($LASTEXITCODE -ne 0) {
+    Write-Warn "Could not fetch remote tags (non-interactive git may lack credentials). Remote tag check skipped."
+} else {
+    $tagExistsRemotely = git tag --list "$tagName" 2>&1
+    if ($tagExistsRemotely) {
+        Write-ErrorExit "Tag '$tagName' already exists on remote."
+    }
+    Write-Host "[PASS] Tag '$tagName' does not exist on remote" -ForegroundColor Green
 }
-Write-Host "[PASS] Tag '$tagName' does not exist yet" -ForegroundColor Green
 
     # -- Update pyproject.toml --
     $pyprojectNew = $pyproject -replace 'version\s*=\s*"\d+\.\d+\.\d+"', "version = `"$newVersion`""
