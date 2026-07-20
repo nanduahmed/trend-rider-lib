@@ -8,7 +8,7 @@ with open("requirements.txt", encoding="utf-8") as f:
 
 setup(
     name="trend-rider-lib",
-    version="0.4.0",
+    version="0.4.1",
     description="Stock trend analysis and trading system with state machine architecture",
     author="Trend Rider",
     packages=find_packages(),
