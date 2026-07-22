@@ -438,8 +438,8 @@ def show(
         None,
         "--state",
         help=(
-            "Filter by FSM state: WARMUP, OBSERVING, BUY_ZONE, UPTREND, "
-            "ABOVE_BUY_ZONE, DOWNTREND, RECOVERING"
+            "Filter by FSM macro-state: WARMUP, OBSERVING, UPTREND, "
+            "DOWNTREND, RECOVERING"
         ),
     ),
     sort_by: str = typer.Option(

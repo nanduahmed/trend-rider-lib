@@ -259,8 +259,15 @@ class DetailWindow(ctk.CTkToplevel):
                 ttk.Label(self.fundamental_frame, text=value).grid(row=r+1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Current State & Status
+        # Determine substate display
+        if hasattr(ctx, 'uptrend_substate') and ctx.uptrend_substate:
+            substate_value = ctx.uptrend_substate
+        else:
+            substate_value = "N/A"
+
         state_items = [
             ("Current State", ctx.current_state),
+            ("Uptrend Substate", substate_value),
             ("TR Qualified", ctx.tr_qualified),
             ("Buy Zone", ctx.is_buyzone),
             ("Warmup Complete", ctx.warmup_complete),

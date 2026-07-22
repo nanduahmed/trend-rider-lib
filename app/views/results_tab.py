@@ -30,6 +30,7 @@ class ResultsTab(ctk.CTkFrame):
         columns = (
             "ticker",
             "state",
+            "substate",
             "classification",
             "uptrends",
             "signals",
@@ -59,6 +60,14 @@ class ResultsTab(ctk.CTkFrame):
                 # Get the attribute, then split by the dot and take the last element
                 state_full = getattr(ctx, "current_state", "")
                 state = state_full.split(".")[-1] if state_full else "-"
+
+                # Extract substate (only meaningful when macro-state is UPTREND)
+                substate = getattr(ctx, "uptrend_substate", None)
+                if substate is None or state != "UPTREND":
+                    substate_display = "-"
+                else:
+                    substate_display = substate.split(".")[-1] if "." in str(substate) else str(substate)
+
                 classification = getattr(ctx, "classification", "")
                 if hasattr(classification, "name"):
                     classification = classification.name
@@ -77,7 +86,7 @@ class ResultsTab(ctk.CTkFrame):
                 self.tree.insert(
                     "",
                     tk.END,
-                    values=(ticker, state, classification, uptrends, signals, trades, last_update),
+                    values=(ticker, state, substate_display, classification, uptrends, signals, trades, last_update),
                 )
         except Exception as exc:  # pragma: no cover – UI surface only
             messagebox.showerror("Error", f"Failed to load results: {exc}")

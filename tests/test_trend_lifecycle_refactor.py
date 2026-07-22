@@ -191,6 +191,27 @@ def test_recovering_bullish_crossover_resets_start_for_new_uptrend():
     assert fsm.context.buy_signal_emitted is True
 
 
+def test_recovering_bullish_crossover_assigns_above_buy_zone_state_when_needed():
+    fsm = StockFSM("TEST", TrendRiderConfig())
+    fsm.context.current_state = State.RECOVERING
+    fsm.machine.set_state(State.RECOVERING.name, model=fsm)
+    fsm.context.tr_qualified = True
+    fsm.context.current_uptrend = UptrendRecord(start_date=pd.Timestamp("2024-01-01"))
+    fsm.context.current_uptrend.cycle_id = 1
+    fsm.context.current_uptrend.start_state = State.RECOVERING.name
+    fsm.context.last_ema21 = 100.0
+    fsm.context.last_ema34 = 99.0
+    fsm.context.last_ema55 = 100.0
+    fsm.context.last_close = 101.0
+    fsm.context.is_buyzone = False
+
+    fsm.process_daily_candle(
+        daily_row("2024-01-02", 100.0, 103.0, 99.5, 102.0, 101.0, 100.0)
+    )
+
+    assert fsm.state == State.UPTREND.name
+
+
 def test_recovering_blocks_buy_signals():
     frame = load_fixture_frame()
     frame = pd.concat(

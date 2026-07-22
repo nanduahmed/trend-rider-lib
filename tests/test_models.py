@@ -78,6 +78,75 @@ def test_stock_context_with_state_enum():
     assert restored.current_state == "UPTREND"
 
 
+# ──────────────────────────────────────────────
+# StockContext — uptrend_substate
+# ──────────────────────────────────────────────
+
+def test_stock_context_uptrend_substate_roundtrip():
+    """uptrend_substate serialises and restores correctly via to_dict/from_dict."""
+    original = StockContext(ticker="AAPL")
+    original.uptrend_substate = "BUY_ZONE"
+
+    d = original.to_dict()
+    assert d["uptrend_substate"] == "BUY_ZONE"
+
+    restored = StockContext.from_dict(d)
+    assert restored.uptrend_substate == "BUY_ZONE"
+
+
+def test_stock_context_uptrend_substate_none():
+    """None uptrend_substate survives roundtrip."""
+    original = StockContext(ticker="TEST")
+    original.uptrend_substate = None
+
+    d = original.to_dict()
+    assert d["uptrend_substate"] is None
+
+    restored = StockContext.from_dict(d)
+    assert restored.uptrend_substate is None
+
+
+def test_stock_context_uptrend_substate_not_in_buy_zone():
+    """NOT_IN_BUY_ZONE substate roundtrips correctly."""
+    original = StockContext(ticker="GOOGL")
+    original.uptrend_substate = "NOT_IN_BUY_ZONE"
+
+    d = original.to_dict()
+    assert d["uptrend_substate"] == "NOT_IN_BUY_ZONE"
+
+    restored = StockContext.from_dict(d)
+    assert restored.uptrend_substate == "NOT_IN_BUY_ZONE"
+
+
+def test_stock_context_uptrend_substate_json_roundtrip():
+    """uptrend_substate survives full JSON serialisation roundtrip."""
+    import json
+    original = StockContext(ticker="MSFT")
+    original.uptrend_substate = "BUY_ZONE"
+
+    d = original.to_dict()
+    json_str = json.dumps(d, default=str)
+    d2 = json.loads(json_str)
+    restored = StockContext.from_dict(d2)
+
+    assert restored.uptrend_substate == "BUY_ZONE"
+
+
+def test_stock_context_uptrend_substate_direct():
+    """uptrend_substate can be set and read directly (no dict)."""
+    ctx = StockContext(ticker="TEST")
+    assert ctx.uptrend_substate is None
+
+    ctx.uptrend_substate = "BUY_ZONE"
+    assert ctx.uptrend_substate == "BUY_ZONE"
+
+    ctx.uptrend_substate = "NOT_IN_BUY_ZONE"
+    assert ctx.uptrend_substate == "NOT_IN_BUY_ZONE"
+
+    ctx.uptrend_substate = None
+    assert ctx.uptrend_substate is None
+
+
 def test_stock_context_with_classification_enum():
     """Classification enum roundtrips correctly."""
     original = StockContext(ticker="GOOGL")

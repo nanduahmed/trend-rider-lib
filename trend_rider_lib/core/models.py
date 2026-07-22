@@ -352,6 +352,7 @@ class StockContext:
             "buy_signal_emitted", "last_buy_signal_type",
             "uptrend_start_date", "last_close",
             "warmup_complete", "candle_count", "trend_cycle_id",
+            "uptrend_substate",
         )
         for attr in extra_attrs:
             val = getattr(self, attr, None)
@@ -433,6 +434,7 @@ class StockContext:
             "first_buy_zone_price", "positive_crossover_price",
             "buy_signal_emitted", "last_buy_signal_type",
             "candle_count", "trend_cycle_id",
+            "uptrend_substate",
         ):
             if attr in d:
                 setattr(ctx, attr, d[attr])

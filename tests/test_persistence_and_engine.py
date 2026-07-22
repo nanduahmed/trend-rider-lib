@@ -20,6 +20,7 @@ from trend_rider_lib import (
     TrendRiderEngine,
 )
 from trend_rider_lib.persistence import SQLiteProvider
+from trend_rider_lib.core.models import UptrendRecord
 
 
 def test_signal_and_trade_enum_round_trip(tmp_path):
@@ -77,7 +78,7 @@ def test_incremental_update_restores_open_trades(tmp_path, monkeypatch):
 
     context = StockContext(
         ticker="TEST",
-        current_state=State.BUY_ZONE,
+        current_state=State.UPTREND,
         tr_qualified=False,
         last_ema21=100.0,
     )
@@ -125,6 +126,59 @@ def test_incremental_update_restores_open_trades(tmp_path, monkeypatch):
     assert closed_trade is not None
     assert closed_trade.status == TradeStatus.CLOSED_TARGET
     assert engine.trade_manager.trade_id_counter >= 7
+
+
+def test_incremental_recovery_confirmation_enters_buy_zone_state(tmp_path, monkeypatch):
+    class FakeTicker:
+        info = {"marketCap": 123}
+
+    monkeypatch.setattr(engine_module.yf, "Ticker", lambda _ticker: FakeTicker())
+
+    db_path = tmp_path / "trend_rider.sqlite"
+    provider = SQLiteProvider(str(db_path))
+    config = TrendRiderConfig()
+    engine = TrendRiderEngine(config, provider, provider, provider)
+
+    context = StockContext(
+        ticker="TEST",
+        current_state=State.RECOVERING,
+        tr_qualified=True,
+        last_ema21=100.0,
+        last_ema34=99.0,
+        last_ema55=100.0,
+        is_buyzone=True,
+    )
+    context.last_close = 101.0
+    context.current_uptrend = UptrendRecord(start_date=datetime(2024, 1, 1))
+    context.current_uptrend.cycle_id = 1
+    context.current_uptrend.start_state = State.RECOVERING.name
+    provider.save_context(context)
+
+    update_frame = pd.DataFrame(
+        [
+            {
+                "Open": 100.0,
+                "High": 1100.0,
+                "Low": 99.0,
+                "Close": 1000.0,
+                "Volume": 1_000_000,
+                "timeframe": "daily",
+            },
+            {
+                "Open": 100.0,
+                "High": 105.0,
+                "Low": 99.0,
+                "Close": 104.0,
+                "Volume": 1_000_000,
+                "timeframe": "weekly",
+            },
+        ],
+        index=[datetime(2024, 1, 2), datetime(2024, 1, 5)],
+    )
+
+    results = engine.run_incremental_update(["TEST"], {"TEST": update_frame})
+
+    assert results["TEST"].current_state == State.UPTREND
 
 
 def test_daily_buy_entry_uses_market_on_close_slippage(tmp_path):

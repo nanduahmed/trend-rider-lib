@@ -2,6 +2,15 @@
 Tests for scan behaviour at different points in the trading week.
 Uses real TIINDIA.NS data to validate weekly candle inclusion and
 state transitions depending on the day of the scan.
+
+NOTE: The scenario data was generated under the OLD state model (flat
+states with ABOVE_BUY_ZONE). After the hierarchical refactor (Option A),
+BUY_ZONE and NOT_IN_BUY_ZONE are substates within the UPTREND macro-state.
+Macro-states are: WARMUP, OBSERVING, UPTREND, DOWNTREND, RECOVERING.
+
+The inline State Before / State After values in the dictionaries below
+reflected the old flat model.  They are kept as-is for documentation
+but the assertions now check macro-state + substate separately.
 """
 from __future__ import annotations
 
@@ -12,6 +21,7 @@ import pytest
 
 from trend_rider_lib import TrendRiderConfig
 from trend_rider_lib.state_machine.fsm import StockFSM
+from trend_rider_lib.core.enums import State, UptrendSubstate
 
 # ---------------------------------------------------------------------------
 # Fixture data directory
@@ -65,8 +75,9 @@ R13_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -94,8 +105,9 @@ R14_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME",
     "TR Qualified": True,
     "Buy Zone": True,
@@ -123,8 +135,9 @@ R15_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -152,8 +165,9 @@ R16_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -181,8 +195,9 @@ R17_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -210,8 +225,9 @@ R17_WEEKLY = {
     "is_above_buyzone": True,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "ABOVE_BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "ABOVE_BUY_ZONE" → "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME",
     "TR Qualified": True,
     "Buy Zone": True,
@@ -255,8 +271,9 @@ R20_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -284,8 +301,9 @@ R21_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -313,8 +331,9 @@ R22_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -342,8 +361,9 @@ R23_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -371,8 +391,9 @@ R24_DAILY = {
     "is_above_buyzone": False,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "BUY_ZONE",
+    # DOC: old model "BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -400,8 +421,9 @@ R24_WEEKLY = {
     "is_above_buyzone": True,
     "is_downtrend_trigger": False,
     "warmup_complete": True,
-    "State Before": "BUY_ZONE",
-    "State After": "ABOVE_BUY_ZONE",
+    # DOC: old model "BUY_ZONE" → "ABOVE_BUY_ZONE"
+    "State Before": "UPTREND",
+    "State After": "UPTREND",
     "Classification": "PRIME_WAITLIST",
     "TR Qualified": True,
     "Buy Zone": False,
@@ -522,7 +544,8 @@ class TestWeeklyScanScenarios:
 
         assert fsm.context.last_update == pd.Timestamp("2019-05-17")
         assert fsm.context.last_ema21 == pytest.approx(353.08, rel=1e-4)
-        assert fsm.state == "BUY_ZONE"
+        assert fsm.state == State.UPTREND.name
+        assert fsm.context.uptrend_substate == UptrendSubstate.BUY_ZONE.name
         assert fsm.context.weekly_candle_count == 81
         assert fsm.context.uptrend_weeks == 45
         assert fsm.context.is_buyzone is True
@@ -538,7 +561,8 @@ class TestWeeklyScanScenarios:
         feed_rows(fsm, frame)
 
         assert fsm.context.last_update == pd.Timestamp("2019-05-17")
-        assert fsm.state == "BUY_ZONE"
+        assert fsm.state == State.UPTREND.name
+        assert fsm.context.uptrend_substate == UptrendSubstate.BUY_ZONE.name
         assert fsm.context.weekly_candle_count == 81
 
     def test_monday_after_close_includes_monday_data(self, config: TrendRiderConfig) -> None:
@@ -553,7 +577,7 @@ class TestWeeklyScanScenarios:
 
         assert fsm.context.last_update == pd.Timestamp("2019-05-20")
         assert fsm.context.last_close == pytest.approx(380.1, rel=1e-4)
-        assert fsm.state == "BUY_ZONE"
+        assert fsm.state == State.UPTREND.name
         assert fsm.context.weekly_candle_count == 81  # No new weekly yet
 
     def test_friday_open_processes_until_thursday(self, config: TrendRiderConfig) -> None:
@@ -567,14 +591,14 @@ class TestWeeklyScanScenarios:
         feed_rows(fsm, frame)
 
         assert fsm.context.last_update == pd.Timestamp("2019-05-23")
-        assert fsm.state == "BUY_ZONE"
+        assert fsm.state == State.UPTREND.name
         assert fsm.context.weekly_candle_count == 81  # No new weekly created yet
 
     def test_friday_after_close_processes_completed_week(self, config: TrendRiderConfig) -> None:
         """
         GIVEN a scan on Friday after market close
         WHEN the full week's daily data AND the weekly candle are included
-        THEN the weekly candle transitions the state to ABOVE_BUY_ZONE.
+        THEN the weekly candle transitions the substate to NOT_IN_BUY_ZONE.
         """
         frame = _build_test_frame(daily_last="2019-05-24", weekly_last="2019-05-24")
         fsm = StockFSM("TIINDIA.NS", config)
@@ -582,7 +606,8 @@ class TestWeeklyScanScenarios:
 
         assert fsm.context.last_update == pd.Timestamp("2019-05-24")
         assert fsm.context.last_ema21 == pytest.approx(356.59, rel=1e-4)
-        assert fsm.state == "ABOVE_BUY_ZONE"
+        assert fsm.state == State.UPTREND.name
+        assert fsm.context.uptrend_substate == UptrendSubstate.NOT_IN_BUY_ZONE.name
         assert fsm.context.weekly_candle_count == 82
         assert fsm.context.uptrend_weeks == 46
         assert fsm.is_above_buyzone() is True

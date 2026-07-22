@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .core.config import TrendRiderConfig
 from .core.models import StockContext, SignalEvent, TradeRecord, TrendEventRecord
-from .core.enums import Classification, SignalType
+from .core.enums import Classification, SignalType, State
 
 from .indicators.resampler import resample_daily_to_weekly
 from .indicators.ema_engine import enrich_with_indicators, incremental_ema
@@ -549,15 +549,19 @@ class TrendRiderEngine:
         fsm = StockFSM(ticker, self.config, signal_callback, event_callback)
         fsm.context = context
 
-        # Use transitions library's set_state() to restore the persisted state
-        # without triggering any on_enter_ or on_exit_ callbacks, which would
-        # corrupt the already-restored context data.
+        # Rehydrate the FSM using the persisted state, but also preserve the
+        # context fields that the FSM logic depends on for zone transitions.
         target_state = (
             context.current_state.name
             if hasattr(context.current_state, 'name')
             else str(context.current_state)
         )
         fsm.machine.set_state(target_state, model=fsm)
+
+        if context.current_state == State.RECOVERING:
+            fsm.context.current_state = context.current_state
+            fsm.context.classification = context.classification
+            fsm.context.uptrend_substate = None
 
         self.fsm_instances[ticker] = fsm
         return fsm

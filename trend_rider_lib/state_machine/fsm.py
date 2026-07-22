@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import pandas as pd
 
 from ..core.config import TrendRiderConfig
-from ..core.enums import Classification, SignalType, State, TrendEventType
+from ..core.enums import Classification, SignalType, State, TrendEventType, UptrendSubstate
 from ..indicators.flag_computer import candle_intersects_buy_zone
 from ..core.models import SignalEvent, StockContext, TrendEventRecord, UptrendRecord
 from .trend_metrics import record_daily_point, update_trend_metrics
@@ -23,9 +23,18 @@ except ImportError:
 class StockFSM:
     """
     Finite state machine for a single stock.
+
+    Macro-states (State enum):
+      WARMUP → OBSERVING → UPTREND ⇄ DOWNTREND ⇄ RECOVERING → UPTREND
+                                                        ↘ DOWNTREND
+
+    When in UPTREND, a separate substate (UptrendSubstate) tracks the
+    current candle's buy-zone position.  Substate transitions do NOT
+    change the macro-state — the uptrend cycle continues uninterrupted.
     """
 
-    states = [state.name for state in State]
+    # Macro-states only; substates tracked via context.uptrend_substate
+    states = [s.name for s in State]
 
     def __init__(
         self,
@@ -67,22 +76,22 @@ class StockFSM:
 
             if self.state == State.WARMUP.name and self.context.weekly_candle_count >= self.config.warmup_weeks:
                 self.context.warmup_complete = True
-                self._set_state(State.OBSERVING)
+                self._set_macro_state(State.OBSERVING)
 
             if pd.isna(self.context.last_ema21):
                 return
 
-            # Official downtrend end.
+            # --- Official downtrend end (UPTREND → DOWNTREND) ---
             if self.context.current_uptrend and self.is_downtrend_trigger():
                 self._finalize_trend_end(row)
                 return
 
-            # Official trend start.
+            # --- New trend start (OBSERVING → UPTREND or DOWNTREND → RECOVERING) ---
             if self.context.current_uptrend is None and self.context.last_close > self.context.last_ema21:
                 self._start_new_trend(row)
                 return
 
-            # Active trend continuation.
+            # --- Active trend continuation ---
             if self.context.current_uptrend and self.context.current_uptrend.start_date is not None:
                 if row.name > self.context.current_uptrend.start_date:
                     # Do NOT count weekly analytics during RECOVERING. The recovery
@@ -92,17 +101,9 @@ class StockFSM:
                     if self.state != State.RECOVERING.name:
                         self._update_active_trend_weekly(row)
 
-                # Buy zone / above zone state tracking remains visible even when
-                # buy signals are not yet eligible.
-                if self.state != State.RECOVERING.name:
-                    if self.is_in_buyzone():
-                        if self.state == State.ABOVE_BUY_ZONE.name:
-                            self._set_state(State.BUY_ZONE)
-                            if self.context.tr_qualified:
-                                self.emit_signal(SignalType.REENTRY, row)
-                    elif self.is_above_buyzone():
-                        if self.state == State.BUY_ZONE.name:
-                            self._set_state(State.ABOVE_BUY_ZONE)
+                # Substate tracking (only meaningful within UPTREND macro-state)
+                if self.state == State.UPTREND.name and self.context.current_uptrend is not None:
+                    self._update_uptrend_substate(row)
 
         finally:
             self._current_row = None
@@ -145,7 +146,7 @@ class StockFSM:
 
             if self.state == State.WARMUP.name and self.context.weekly_candle_count >= self.config.warmup_weeks:
                 self.context.warmup_complete = True
-                self._set_state(State.OBSERVING)
+                self._set_macro_state(State.OBSERVING)
 
         finally:
             self._current_row = None
@@ -153,10 +154,47 @@ class StockFSM:
     # ---------------------------------------------------------------------
     # State helpers
     # ---------------------------------------------------------------------
-    def _set_state(self, state: State) -> None:
+    def _set_macro_state(self, state: State) -> None:
+        """Set the macro-level state (WARMUP, OBSERVING, UPTREND, DOWNTREND, RECOVERING).
+
+        When transitioning *into* UPTREND the substate is determined by
+        the current candle's zone position.  When transitioning *out of*
+        UPTREND the substate is cleared.
+        """
         self.machine.set_state(state.name, model=self)
         self.context.current_state = state
+        if state != State.UPTREND:
+            self.context.uptrend_substate = None
 
+    def _set_uptrend_substate(self, substate: UptrendSubstate) -> None:
+        """Transition between substates *within* UPTREND.
+
+        The macro-state UPTREND remains unchanged — only the substate
+        tracking field on context is updated.
+        """
+        if self.state != State.UPTREND.name:
+            return
+        previous = self.context.uptrend_substate
+        self.context.uptrend_substate = substate.name
+
+    def _update_uptrend_substate(self, row: pd.Series) -> None:
+        """Update the UPTREND substate based on zone flags.
+
+        Called once per weekly candle when the macro-state is UPTREND.
+        """
+        if self.is_in_buyzone():
+            was_not_in_buyzone = self.context.uptrend_substate != UptrendSubstate.BUY_ZONE.name
+            self._set_uptrend_substate(UptrendSubstate.BUY_ZONE)
+            if was_not_in_buyzone and self.context.tr_qualified:
+                self.emit_signal(SignalType.REENTRY, row)
+            if self.context.current_uptrend and self.context.current_uptrend.first_buy_zone_date is None:
+                self._set_first_buy_zone(row)
+        elif self.is_above_buyzone():
+            self._set_uptrend_substate(UptrendSubstate.NOT_IN_BUY_ZONE)
+
+    # ---------------------------------------------------------------------
+    # Zone guards (unchanged logic, renamed method kept for clarity)
+    # ---------------------------------------------------------------------
     def _refresh_zone_flags(self, row: pd.Series) -> None:
         if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
             self.context.is_buyzone = False
@@ -169,6 +207,24 @@ class StockFSM:
             self.config.buy_zone_upper_pct,
         )
 
+    def is_in_buyzone(self) -> bool:
+        return self.context.is_buyzone
+
+    def is_above_buyzone(self) -> bool:
+        if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
+            return False
+        upper_bound = self.context.last_ema21 * (1 + self.config.buy_zone_upper_pct)
+        return self.context.last_close > upper_bound
+
+    def is_downtrend_trigger(self) -> bool:
+        if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
+            return False
+        trigger_level = self.context.last_ema21 * (1 - self.config.downtrend_trigger_pct)
+        return self.context.last_close < trigger_level
+
+    # ---------------------------------------------------------------------
+    # EMA crossover detection
+    # ---------------------------------------------------------------------
     def _is_bullish_ema_cross(
         self,
         previous_ema34: Optional[float],
@@ -191,17 +247,17 @@ class StockFSM:
             return False
         return previous_ema34 >= previous_ema55 and current_ema34 < current_ema55
 
+    # ---------------------------------------------------------------------
+    # Daily confirmation / trigger recording
+    # ---------------------------------------------------------------------
     def _maybe_record_daily_ema21_confirmation(self, row: pd.Series, previous_close: Optional[float]) -> None:
         if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
             return
-
         if previous_close is None:
             return
-
         crossed_above = previous_close <= self.context.last_ema21 and self.context.last_close > self.context.last_ema21
         if not crossed_above:
             return
-
         if self.context.daily_ema21_cross_date is None:
             self.context.daily_ema21_cross_date = row.name
             self.context.daily_ema21_cross_price = self.context.last_close
@@ -211,19 +267,15 @@ class StockFSM:
         self._emit_trend_event(
             TrendEventType.DAILY_EMA21_CONFIRMATION,
             row,
-            {
-                "reason": "Daily close crossed above weekly EMA21 for confirmation",
-            },
+            {"reason": "Daily close crossed above weekly EMA21 for confirmation"},
         )
 
     def _maybe_record_daily_downtrend_trigger(self, row: pd.Series) -> None:
         if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
             return
-
         trigger_level = self.context.last_ema21 * (1 - self.config.downtrend_trigger_pct)
         if self.context.last_close >= trigger_level:
             return
-
         if self.context.daily_downtrend_trigger_date is None:
             self.context.daily_downtrend_trigger_date = row.name
             self.context.daily_downtrend_trigger_price = self.context.last_close
@@ -236,7 +288,16 @@ class StockFSM:
             {"reason": "Daily close fell below the 0.90 * EMA21 trigger"},
         )
 
+    # ---------------------------------------------------------------------
+    # Trend lifecycle
+    # ---------------------------------------------------------------------
     def _start_new_trend(self, row: pd.Series) -> None:
+        """Handle weekly close > EMA21 when not already in an uptrend.
+
+        Two paths:
+          - OBSERVING → UPTREND   (first entry into an uptrend)
+          - DOWNTREND → RECOVERING (recovery from prior downtrend)
+        """
         self.context.trend_cycle_id = (self.context.trend_cycle_id or 0) + 1
         self.context.trend_start_date = row.name
         self.context.uptrend_start_date = row.name
@@ -272,19 +333,20 @@ class StockFSM:
         self._emit_trend_event(
             TrendEventType.WEEKLY_TREND_START,
             row,
-            {
-                "reason": "Weekly close confirmed the official trend start",
-            },
+            {"reason": "Weekly close confirmed the official trend start"},
         )
         self.emit_signal(SignalType.UPTREND_START, row)
 
         if self.context.trend_cycle_id is not None:
             self.context.current_uptrend.start_date = row.name
 
+        # Determine macro-state: RECOVERING if coming from DOWNTREND, else UPTREND
         if self.state == State.DOWNTREND.name:
-            self._set_state(State.RECOVERING)
+            self._set_macro_state(State.RECOVERING)
         else:
-            self._set_state(State.BUY_ZONE if self.is_in_buyzone() else State.ABOVE_BUY_ZONE)
+            # OBSERVING → UPTREND — enter macro-state with appropriate substate
+            self._set_macro_state(State.UPTREND)
+            self._update_uptrend_substate(row)
 
         self.context.current_uptrend.start_state = self.state
 
@@ -298,13 +360,8 @@ class StockFSM:
     def _update_active_trend_weekly(self, row: pd.Series) -> None:
         if self.context.current_uptrend is None:
             return
-
         if self.context.current_uptrend.start_date is not None and row.name <= self.context.current_uptrend.start_date:
             return
-
-        # Exclude recovery crossover week: the week in which a bullish crossover
-        # confirmed the recovered uptrend must be excluded from weekly statistics
-        # per design.md Section 1 (Boundary Behaviour).
         if self.context.recovery_crossover_week is not None and row.name == self.context.recovery_crossover_week:
             return
 
@@ -340,7 +397,6 @@ class StockFSM:
     def _set_first_buy_zone(self, row: pd.Series) -> None:
         if self.context.current_uptrend is None or self.context.first_buy_zone_date is not None:
             return
-
         self.context.first_buy_zone_date = row.name
         self.context.first_buy_zone_price = row.get("Close")
         self.context.current_uptrend.first_buy_zone_date = row.name
@@ -350,15 +406,12 @@ class StockFSM:
     def _update_extremes(self, row: pd.Series) -> None:
         if self.context.current_uptrend is None:
             return
-
         high = row.get("High")
         low = row.get("Low")
-
         if high is not None and not pd.isna(high):
             if self.context.current_uptrend.highest_price is None or high > self.context.current_uptrend.highest_price:
                 self.context.current_uptrend.highest_price = high
                 self.context.current_uptrend.highest_price_date = row.name
-
         if low is not None and not pd.isna(low):
             if self.context.current_uptrend.lowest_price is None or low < self.context.current_uptrend.lowest_price:
                 self.context.current_uptrend.lowest_price = low
@@ -376,15 +429,9 @@ class StockFSM:
         )
         self.emit_signal(SignalType.EMA_CROSSOVER, row)
 
-        # Capture the current state before any transitions, so we can
-        # correctly determine the signal type even after a RECOVERING → UPTREND
-        # transition below.
         was_recovering = self.state == State.RECOVERING.name
 
-        # RECOVERING → UPTREND state transition must happen regardless of
-        # tr_qualified. The bullish crossover confirms the recovered trend
-        # and resets analytics so recovery weeks are excluded from counts.
-        # Buy signals remain gated by tr_qualified below.
+        # RECOVERING → UPTREND: bullish crossover confirms the recovered trend.
         if was_recovering:
             anchor_date = (
                 self.context.current_uptrend.start_date
@@ -397,9 +444,6 @@ class StockFSM:
             self.context.closes_above_ema = 0
             self.context.closes_below_ema = 0
 
-            # Compute the weekly anchor for the crossover date so that the
-            # week containing the crossover day is excluded from weekly
-            # analytics counts per design.md Section 1 (Boundary Behaviour).
             crossover_week_end = self._compute_week_end(row.name)
             self.context.recovery_crossover_week = crossover_week_end
 
@@ -413,20 +457,17 @@ class StockFSM:
                 self.context.current_uptrend.strength = None
                 self.context.current_uptrend.first_buy_zone_date = None
                 self.context.current_uptrend.first_buy_zone_price = None
-            self._set_state(State.UPTREND)
 
-        # Buy signal emission requires tr_qualified, buy zone, and no
-        # duplicate emission — but the state transition above already
-        # handled the RECOVERING case.
+            # Enter UPTREND macro-state; substate determined on next weekly candle
+            self._set_macro_state(State.UPTREND)
+
+        # Buy signal emission requires tr_qualified, buy zone, and no duplicate
         if not self.context.tr_qualified:
             return
-
         if self.context.buy_signal_emitted:
             return
-
         if self.context.current_uptrend is None:
             return
-
         if not self.is_in_buyzone():
             return
 
@@ -437,19 +478,10 @@ class StockFSM:
         self.context.last_buy_signal_type = signal_type
         self.context.last_buy_signal_crossover_date = row.name
 
-        # Do NOT transition again if we were RECOVERING — the recovery
-        # transition block above already handled the state (UPTREND) and
-        # analytics reset.
-        if not was_recovering:
-            if self.is_in_buyzone():
-                self._set_state(State.BUY_ZONE)
-            else:
-                self._set_state(State.ABOVE_BUY_ZONE)
-
-    def _compute_week_end(self, date: pd.Timestamp) -> pd.Timestamp:
+    def _compute_week_end(self, date) -> pd.Timestamp:
         """Compute the end of the W-FRI week for the given date."""
-        # Use pandas to compute weekly period ending on Friday
-        week_period = date.to_period("W-FRI")
+        ts = pd.Timestamp(date) if not isinstance(date, pd.Timestamp) else date
+        week_period = ts.to_period("W-FRI")
         return week_period.end_time
 
     def _reset_bullish_crossover_latch(self) -> None:
@@ -460,6 +492,7 @@ class StockFSM:
         self.context.last_buy_signal_crossover_date = None
 
     def _finalize_trend_end(self, row: pd.Series) -> None:
+        """UPTREND → DOWNTREND: end the current uptrend cycle."""
         if self.context.current_uptrend is not None:
             self._update_extremes(row)
             update_trend_metrics(self.context.current_uptrend, self.context.last_close)
@@ -490,25 +523,7 @@ class StockFSM:
         self.context.daily_ema21_cross_price = None
         self.context.recovery_crossover_week = None
         self._reset_bullish_crossover_latch()
-        self._set_state(State.DOWNTREND)
-
-    # ---------------------------------------------------------------------
-    # Guards
-    # ---------------------------------------------------------------------
-    def is_in_buyzone(self) -> bool:
-        return self.context.is_buyzone
-
-    def is_above_buyzone(self) -> bool:
-        if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
-            return False
-        upper_bound = self.context.last_ema21 * (1 + self.config.buy_zone_upper_pct)
-        return self.context.last_close > upper_bound
-
-    def is_downtrend_trigger(self) -> bool:
-        if pd.isna(self.context.last_ema21) or pd.isna(self.context.last_close):
-            return False
-        trigger_level = self.context.last_ema21 * (1 - self.config.downtrend_trigger_pct)
-        return self.context.last_close < trigger_level
+        self._set_macro_state(State.DOWNTREND)
 
     # ---------------------------------------------------------------------
     # Signal / event emission
@@ -516,7 +531,6 @@ class StockFSM:
     def emit_signal(self, signal_type: SignalType, row: Optional[pd.Series] = None) -> None:
         if not self.signal_callback:
             return
-
         source_row = row if row is not None else self._current_row
         metadata = self._build_signal_metadata(signal_type, source_row)
         signal = SignalEvent(
@@ -544,7 +558,6 @@ class StockFSM:
     ) -> None:
         if not self.event_callback:
             return
-
         source_row = row if row is not None else self._current_row
         event = TrendEventRecord(
             ticker=self.ticker,
@@ -568,10 +581,8 @@ class StockFSM:
             return None
         if isinstance(value, datetime):
             return value.isoformat()
-        # Handle string values (e.g., from legacy database entries or failed deserialization)
         if isinstance(value, str):
             try:
-                # Handle space-separated ISO format (e.g., '2018-07-06 00:00:00+05:30')
                 parsed = datetime.fromisoformat(value.replace(' ', 'T'))
                 return parsed.isoformat()
             except (ValueError, TypeError):
@@ -593,6 +604,7 @@ class StockFSM:
             "reason": reason_map.get(signal_type, signal_type.name),
             "timeframe": row.get("timeframe") if row is not None and "timeframe" in row else None,
             "state": self.state,
+            "uptrend_substate": self.context.uptrend_substate,
             "candle_count": self.context.candle_count,
             "weekly_candle_count": self.context.weekly_candle_count,
             "uptrend_weeks": self.context.uptrend_weeks,
