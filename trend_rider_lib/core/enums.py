@@ -5,14 +5,49 @@ from enum import Enum, auto
 
 
 class State(Enum):
-    """FSM states for stock analysis."""
+    """FSM macro-level states for stock analysis.
+
+    UPTREND is a container (macro-state) with two substates
+    defined in UptrendSubstate. The state machine is always
+    in exactly one macro-state, and when that macro-state is
+    UPTREND it is also in exactly one substate.
+
+    Transitions between macro-states:
+      WARMUP      → OBSERVING        (weekly_candle_count >= warmup_weeks)
+      OBSERVING   → UPTREND          (weekly close > EMA21)
+      UPTREND     → DOWNTREND        (weekly close < 0.90 × EMA21)
+      DOWNTREND   → RECOVERING       (weekly close > EMA21)
+      RECOVERING  → UPTREND          (daily EMA34 > EMA55 — bullish crossover)
+      RECOVERING  → DOWNTREND        (weekly close < 0.90 × EMA21)
+
+    Blocked transitions (one-way latches / disallowed paths):
+      UPTREND     → OBSERVING        (never)
+      UPTREND     → RECOVERING       (must go through DOWNTREND)
+      DOWNTREND   → OBSERVING        (never)
+      DOWNTREND   → UPTREND          (must go through RECOVERING)
+      RECOVERING  → OBSERVING        (never)
+      WARMUP      → (any except OBSERVING)
+    """
     WARMUP = auto()
     OBSERVING = auto()
-    BUY_ZONE = auto()
-    UPTREND = auto()
-    ABOVE_BUY_ZONE = auto()
+    UPTREND = auto()       # Macro-state; actual candle position tracked via UptrendSubstate
     DOWNTREND = auto()
     RECOVERING = auto()
+
+
+class UptrendSubstate(Enum):
+    """Substates within the UPTREND macro-state.
+
+    These capture the current weekly candle's position relative
+    to the EMA21 buy-zone band.  They DO NOT represent separate
+    macro-level states — the trend cycle (UPTREND) is continuous.
+
+    Transitions (within UPTREND only):
+      BUY_ZONE          → NOT_IN_BUY_ZONE   (no qualifying green candle)
+      NOT_IN_BUY_ZONE   → BUY_ZONE           (green candle qualifies buy zone)
+    """
+    BUY_ZONE = auto()
+    NOT_IN_BUY_ZONE = auto()
 
 
 class Classification(Enum):

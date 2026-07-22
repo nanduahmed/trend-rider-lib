@@ -101,6 +101,7 @@ def serialize_context(context: StockContext) -> Dict[str, Any]:
         'warmup_complete': bool(context.warmup_complete),
         'candle_count': int(context.candle_count),
         'weekly_candle_count': int(context.weekly_candle_count),
+        'uptrend_substate': context.uptrend_substate,
         'recovery_crossover_week': context.recovery_crossover_week.isoformat() if context.recovery_crossover_week else None,
         'current_uptrend': serialize_uptrend(context.current_uptrend) if context.current_uptrend else None,
         'uptrend_history': [serialize_uptrend(u) for u in context.uptrend_history],
@@ -159,6 +160,7 @@ def deserialize_context(data: Dict[str, Any]) -> StockContext:
     context.candle_count = data.get('candle_count', 0)
     context.weekly_candle_count = data.get('weekly_candle_count', 0)
     context.recovery_crossover_week = datetime.fromisoformat(data['recovery_crossover_week']) if data.get('recovery_crossover_week') else None
+    context.uptrend_substate = data.get('uptrend_substate')
 
     if data.get('current_uptrend'):
         context.current_uptrend = deserialize_uptrend(data['current_uptrend'])

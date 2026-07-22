@@ -6,7 +6,16 @@ from datetime import datetime
 import json
 import logging
 
-from .enums import Classification, ExitReason, SignalType, TradeStatus, TrendEventType, UptrendStrength
+from .enums import (
+    Classification,
+    ExitReason,
+    SignalType,
+    State,
+    TradeStatus,
+    TrendEventType,
+    UptrendStrength,
+    UptrendSubstate,
+)
 
 
 class UptrendRecord:
@@ -307,6 +316,7 @@ class StockContext:
         self.uptrend_history: List[UptrendRecord] = []
         self.classification: Optional[Classification] = None
         self.trend_cycle_id: Optional[int] = None
+        self.uptrend_substate: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize StockContext to dict for JSON persistence.
